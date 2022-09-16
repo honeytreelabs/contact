@@ -1,0 +1,16 @@
+---
+version: "3.8"
+services:
+  contact:
+    build:
+      context: .
+    restart: unless-stopped
+    environment:
+      MAIL_FROM:
+      MAIL_TO:
+      MAIL_USER:
+      MAIL_PASSWORD:
+      MAIL_HOST:
+      MAIL_PORT:
+    ports:
+      - 8080:8080
