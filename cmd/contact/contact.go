@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"io"
 	"log"
 	"net"
 	"net/http"
@@ -55,19 +54,30 @@ func (c ContactHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// not using ioutil.ReadAll here: https://haisum.github.io/2017/09/11/golang-ioutil-readall/
-	body := make([]byte, 256)
-	numRead, err := r.Body.Read(body)
-	if err != nil && err != io.EOF {
-		http.Error(w, "Internal Server Error.", http.StatusInternalServerError)
-		fmt.Printf("Cannot read request body: %v\n", err)
+	r.Body = http.MaxBytesReader(w, r.Body, 512)
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "Bad Request.", http.StatusBadRequest)
+		fmt.Printf("Cannot parse form: %v\n", err)
 		return
 	}
-	body = body[:numRead]
+
+	if r.PostForm.Get("contact-dsgvo-checkbox") == "" {
+		http.Error(w, "Bad Request.", http.StatusBadRequest)
+		fmt.Printf("DSGVO checkbox not activated.")
+		return
+	}
+
+	email := r.PostForm.Get("email")
+	if email == "" {
+		http.Error(w, "Bad Request.", http.StatusBadRequest)
+		fmt.Printf("Email address not submitted.\n")
+		return
+	}
 
 	// Non-Blocking Channel Operations: https://gobyexample.com/non-blocking-channel-operations
 	select {
 	case c.contacts <- Message{
-		info: string(body),
+		info: email,
 	}:
 		break
 	default:
