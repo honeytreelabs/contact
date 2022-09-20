@@ -84,10 +84,12 @@ func (c ContactHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func isEmailAddressValid(input string) bool {
 	address, err := mail.ParseAddress(input)
 	if err != nil {
+		fmt.Printf("Cannot parse address: %v\n", err)
 		return false
 	}
 	domain := strings.Split(address.Address, "@")[1]
 	if mx, errLookup := net.LookupMX(domain); errLookup != nil || len(mx) == 0 {
+		fmt.Printf("Cannot lookup MX record: %v\n", errLookup)
 		return false
 	}
 	return true
