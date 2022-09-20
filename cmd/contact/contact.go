@@ -2,7 +2,7 @@ package main
 
 import (
 	"fmt"
-	"io/ioutil"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -54,11 +54,15 @@ func (c ContactHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	body, err := ioutil.ReadAll(r.Body)
-	if err != nil {
+	// not using ioutil.ReadAll here: https://haisum.github.io/2017/09/11/golang-ioutil-readall/
+	body := make([]byte, 256)
+	numRead, err := r.Body.Read(body)
+	if err != nil && err != io.EOF {
 		http.Error(w, "Internal Server Error.", http.StatusInternalServerError)
+		fmt.Printf("Cannot read request body: %v\n", err)
 		return
 	}
+	body = body[:numRead]
 
 	// Non-Blocking Channel Operations: https://gobyexample.com/non-blocking-channel-operations
 	select {
