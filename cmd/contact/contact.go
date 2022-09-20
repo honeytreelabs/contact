@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
+	"net"
 	"net/http"
+	"net/mail"
 	"net/smtp"
 	"os"
 	"strings"
@@ -72,9 +74,31 @@ func (c ContactHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "Thanks.")
 }
 
+// checking email addresses in go:
+// - https://ayada.dev/posts/validate-email-address-in-go/
+// - https://pkg.go.dev/net/mail#ParseAddress
+func isEmailAddressValid(input string) bool {
+	address, err := mail.ParseAddress(input)
+	if err != nil {
+		return false
+	}
+	domain := strings.Split(address.Address, "@")[1]
+	if mx, errLookup := net.LookupMX(domain); errLookup != nil || len(mx) == 0 {
+		return false
+	}
+	return true
+}
+
+// sending mails with golang:
+// - https://www.loginradius.com/blog/engineering/sending-emails-with-golang/
 func sendMail(cfg Config, msg Message) {
-	// sending mails with golang: https://www.loginradius.com/blog/engineering/sending-emails-with-golang/
+	if !isEmailAddressValid(msg.info) {
+		fmt.Printf("Cannot parse given email address: %s\n", msg.info)
+		return
+	}
+
 	raw := `Subject: Contact Request
+From: honeytreeLabs ContactBot <contactbot@honeytreelabs.com>
 Content-Type: text/plain; charset="UTF-8"
 
 Please respond to the following mail address: {email}
@@ -90,7 +114,7 @@ Please respond to the following mail address: {email}
 		fmt.Println(err)
 		return
 	}
-	fmt.Println("Email Sent Successfully!")
+	fmt.Printf("Email sent successfully for %s\n", msg.info)
 }
 
 // rateLimit reads out of the queue of email addresses
