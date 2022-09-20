@@ -85,7 +85,7 @@ func (c ContactHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	fmt.Fprintf(w, "Thanks.")
+	fmt.Fprintf(w, "Sent.")
 }
 
 // checking email addresses in go:
