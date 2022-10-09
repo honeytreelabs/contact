@@ -62,13 +62,13 @@ func (c ContactHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if r.PostForm.Get("contact-dsgvo-checkbox") == "" {
+	if r.PostFormValue("contact-dsgvo-checkbox") == "" {
 		http.Error(w, "Bad Request.", http.StatusBadRequest)
 		fmt.Printf("DSGVO checkbox not activated.")
 		return
 	}
 
-	userEmail := r.PostForm.Get("email")
+	userEmail := r.PostFormValue("email")
 	if userEmail == "" {
 		http.Error(w, "Bad Request.", http.StatusBadRequest)
 		fmt.Printf("Email address not submitted.\n")
@@ -76,7 +76,7 @@ func (c ContactHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// message can be empty
-	userMessage := r.PostForm.Get("message")
+	userMessage := r.PostFormValue("message")
 	// Sanitize using microcosm-cc/bluemonday
 	// bluemonday.StrictPolicy()
 
