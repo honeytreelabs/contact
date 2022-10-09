@@ -12,6 +12,7 @@ import (
 	"time"
 
 	env "github.com/caarlos0/env/v6"
+	"github.com/microcosm-cc/bluemonday"
 )
 
 type ConfigEmail struct {
@@ -78,7 +79,8 @@ func (c ContactHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// message can be empty
 	userMessage := r.PostFormValue("message")
 	// Sanitize using microcosm-cc/bluemonday
-	// bluemonday.StrictPolicy()
+	bmSanitizer := bluemonday.StrictPolicy()
+	userMessage = bmSanitizer.Sanitize(userMessage)
 
 	// Non-Blocking Channel Operations: https://gobyexample.com/non-blocking-channel-operations
 	select {
