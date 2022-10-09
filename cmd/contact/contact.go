@@ -32,7 +32,8 @@ type Config struct {
 }
 
 type Message struct {
-	info string
+	email string
+	text  string
 }
 
 type MessageChannel chan Message
@@ -67,17 +68,23 @@ func (c ContactHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	email := r.PostForm.Get("email")
-	if email == "" {
+	userEmail := r.PostForm.Get("email")
+	if userEmail == "" {
 		http.Error(w, "Bad Request.", http.StatusBadRequest)
 		fmt.Printf("Email address not submitted.\n")
 		return
 	}
 
+	// message can be empty
+	userMessage := r.PostForm.Get("message")
+	// Sanitize using microcosm-cc/bluemonday
+	// bluemonday.StrictPolicy()
+
 	// Non-Blocking Channel Operations: https://gobyexample.com/non-blocking-channel-operations
 	select {
 	case c.contacts <- Message{
-		info: email,
+		email: userEmail,
+		text:  userMessage,
 	}:
 		break
 	default:
@@ -108,8 +115,8 @@ func isEmailAddressValid(input string) bool {
 // sending mails with golang:
 // - https://www.loginradius.com/blog/engineering/sending-emails-with-golang/
 func sendMail(cfg Config, msg Message) {
-	if !isEmailAddressValid(msg.info) {
-		fmt.Printf("Cannot parse given email address: %s\n", msg.info)
+	if !isEmailAddressValid(msg.email) {
+		fmt.Printf("Cannot parse given email address: %s\n", msg.email)
 		return
 	}
 
@@ -117,9 +124,14 @@ func sendMail(cfg Config, msg Message) {
 From: honeytreeLabs ContactBot <contactbot@honeytreelabs.com>
 Content-Type: text/plain; charset="UTF-8"
 
-Please respond to the following mail address: {email}
+We have received a new contact request:
+{email}
+
+User Message:
+'{userMessage}'
 `
-	raw = strings.Replace(raw, "{email}", msg.info, -1)
+	raw = strings.Replace(raw, "{email}", msg.email, -1)
+	raw = strings.Replace(raw, "{userMessage}", msg.text, -1)
 	auth := smtp.PlainAuth("", cfg.Mail.From, cfg.Mail.Password, cfg.Mail.Host)
 	err := smtp.SendMail(fmt.Sprintf("%s:%d", cfg.Mail.Host, cfg.Mail.Port),
 		auth,
@@ -130,7 +142,7 @@ Please respond to the following mail address: {email}
 		fmt.Println(err)
 		return
 	}
-	fmt.Printf("Email sent successfully for %s\n", msg.info)
+	fmt.Printf("Email sent successfully for %s\n", msg.email)
 }
 
 // rateLimit reads out of the queue of email addresses
