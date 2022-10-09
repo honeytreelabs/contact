@@ -167,7 +167,7 @@ func rateLimit(cfg Config, source MessageChannel, destination func(cfg Config, m
 }
 
 // test using the following command:
-// curl -v http://localhost:8080/contact -d"some.one@somewhere.com"
+// curl -v http://localhost:8080/contact -X POST --data-raw 'email=email%40test.example.com&message=message&contact-dsgvo-checkbox=on'
 func main() {
 	cfg := Config{}
 	if err := env.Parse(&cfg); err != nil {
