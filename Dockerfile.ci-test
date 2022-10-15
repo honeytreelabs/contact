@@ -1,0 +1,6 @@
+FROM golang:1.19-alpine AS golang
+
+WORKDIR /build
+COPY . .
+
+ENV CGO_ENABLED=0
