@@ -30,6 +30,4 @@ build:
 test:
   stage: test
   script:
-    # TODO: use build number (variable) in tag of image to allow for parallel builds
-    - docker build -f Dockerfile.ci-test -t honeytreelabs/contact-test:latest .
-    - docker run honeytreelabs/contact-test:latest go test ./...
+    - docker run --rm $(docker build -f Dockerfile.ci-test -q .) go test ./...
