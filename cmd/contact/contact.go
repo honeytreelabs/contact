@@ -78,7 +78,7 @@ func (c ContactHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// message can be empty
 	userMessage := r.PostFormValue("message")
-	// Sanitize using microcosm-cc/bluemonday
+
 	bmSanitizer := bluemonday.StrictPolicy()
 	userMessage = bmSanitizer.Sanitize(userMessage)
 
