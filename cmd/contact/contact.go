@@ -122,8 +122,9 @@ func sendMail(cfg Config, msg Message) {
 		return
 	}
 
-	raw := `Subject: Contact Request
-From: honeytreeLabs ContactBot <contactbot@honeytreelabs.com>
+	raw := `From: honeytreeLabs ContactBot <{sender}>
+To: Contact Handler <{receiver}>
+Subject: Contact Request
 Content-Type: text/plain; charset="UTF-8"
 
 We have received a new contact request:
@@ -134,6 +135,8 @@ User Message:
 `
 	raw = strings.Replace(raw, "{email}", msg.email, -1)
 	raw = strings.Replace(raw, "{userMessage}", msg.text, -1)
+	raw = strings.Replace(raw, "{sender}", cfg.Mail.From, -1)
+	raw = strings.Replace(raw, "{receiver}", cfg.Mail.To, -1)
 	auth := smtp.PlainAuth("", cfg.Mail.From, cfg.Mail.Password, cfg.Mail.Host)
 	err := smtp.SendMail(fmt.Sprintf("%s:%d", cfg.Mail.Host, cfg.Mail.Port),
 		auth,
