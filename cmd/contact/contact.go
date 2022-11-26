@@ -124,7 +124,7 @@ func sendMail(cfg Config, msg Message) {
 
 	raw := `From: honeytreeLabs ContactBot <{sender}>
 To: Contact Handler <{receiver}>
-Subject: Contact Request
+Subject: Contact Request from <{email}>
 Content-Type: text/plain; charset="UTF-8"
 
 We have received a new contact request:
