@@ -8,23 +8,24 @@ github.com/caarlos0/env/v6
 # github.com/davecgh/go-spew v1.1.1
 ## explicit
 github.com/davecgh/go-spew/spew
-# github.com/gorilla/css v1.0.0
-## explicit
+# github.com/gorilla/css v1.0.1
+## explicit; go 1.20
 github.com/gorilla/css/scanner
-# github.com/microcosm-cc/bluemonday v1.0.21
+# github.com/microcosm-cc/bluemonday v1.0.27
 ## explicit; go 1.19
 github.com/microcosm-cc/bluemonday
 github.com/microcosm-cc/bluemonday/css
 # github.com/pmezard/go-difflib v1.0.0
 ## explicit
 github.com/pmezard/go-difflib/difflib
-# github.com/stretchr/testify v1.8.0
-## explicit; go 1.13
+# github.com/stretchr/testify v1.10.0
+## explicit; go 1.17
 github.com/stretchr/testify/assert
+github.com/stretchr/testify/assert/yaml
 github.com/stretchr/testify/require
 github.com/stretchr/testify/suite
-# golang.org/x/net v0.0.0-20221002022538-bcab6841153b
-## explicit; go 1.17
+# golang.org/x/net v0.34.0
+## explicit; go 1.18
 golang.org/x/net/html
 golang.org/x/net/html/atom
 # gopkg.in/yaml.v3 v3.0.1
