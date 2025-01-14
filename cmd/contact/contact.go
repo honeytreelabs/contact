@@ -60,11 +60,13 @@ func (c ContactHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	if r.URL.Path != c.cfg.Path {
 		http.Error(w, "Not found.", http.StatusNotFound)
+		fmt.Printf("Path \"%s\" not found.\n", r.URL.Path)
 		return
 	}
 
 	if r.Method != "POST" {
 		http.Error(w, "Bad Request.", http.StatusBadRequest)
+		fmt.Printf("Wrong HTTP method \"%s\"\n", r.Method)
 		return
 	}
 
@@ -78,7 +80,7 @@ func (c ContactHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	if r.PostFormValue("contact-dsgvo-checkbox") == "" {
 		http.Error(w, "Bad Request.", http.StatusBadRequest)
-		fmt.Printf("DSGVO checkbox not activated.")
+		fmt.Printf("DSGVO checkbox not activated.\n")
 		return
 	}
 
