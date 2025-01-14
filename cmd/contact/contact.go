@@ -138,7 +138,7 @@ User Message:
 	raw = strings.Replace(raw, "{userMessage}", msg.text, -1)
 	raw = strings.Replace(raw, "{sender}", cfg.Mail.From, -1)
 	raw = strings.Replace(raw, "{receiver}", cfg.Mail.To, -1)
-	auth := smtp.PlainAuth("", cfg.Mail.From, cfg.Mail.Password, cfg.Mail.Host)
+	auth := smtp.PlainAuth("", cfg.Mail.User, cfg.Mail.Password, cfg.Mail.Host)
 	err := smtp.SendMail(fmt.Sprintf("%s:%d", cfg.Mail.Host, cfg.Mail.Port),
 		auth,
 		cfg.Mail.From,
