@@ -25,11 +25,12 @@ type ConfigEmail struct {
 }
 
 type Config struct {
-	ListenAddress      string        `env:"LISTEN_ADDRESS" envDefault:":8080"`
-	QueueLength        int           `env:"QUEUE_LENGTH" envDefault:"5"`
-	RateLimitingWindow time.Duration `env:"RATE_LIMITING_WINDOW" envDefault:"5s"`
-	Path               string        `env:"URL_PATH" envDefault:"/contact"`
-	Mail               ConfigEmail
+	ListenAddress            string        `env:"LISTEN_ADDRESS" envDefault:":8080"`
+	QueueLength              int           `env:"QUEUE_LENGTH" envDefault:"5"`
+	RateLimitingWindow       time.Duration `env:"RATE_LIMITING_WINDOW" envDefault:"5s"`
+	Path                     string        `env:"URL_PATH" envDefault:"/contact"`
+	AccessControlAllowOrigin string        `env:"ACCESS_CONTROL_ALLOW_ORIGIN" envDefault:""`
+	Mail                     ConfigEmail
 }
 
 type Message struct {
@@ -45,6 +46,18 @@ type ContactHandler struct {
 }
 
 func (c ContactHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if c.cfg.AccessControlAllowOrigin != "" {
+		w.Header().Set("Access-Control-Allow-Origin", c.cfg.AccessControlAllowOrigin)
+		w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		w.Header().Set("Access-Control-Max-Age", "3600")
+	}
+
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
 	if r.URL.Path != c.cfg.Path {
 		http.Error(w, "Not found.", http.StatusNotFound)
 		return

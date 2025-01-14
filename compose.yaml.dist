@@ -5,6 +5,7 @@ services:
       context: .
     restart: unless-stopped
     environment:
+      ACCESS_CONTROL_ALLOW_ORIGIN: "https://example.com"  # optional
       MAIL_FROM: "contactbot@example.com"
       MAIL_TO: "office@example.com"
       MAIL_USER: smtpuser@example.com
