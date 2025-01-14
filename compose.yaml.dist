@@ -10,6 +10,8 @@ services:
       MAIL_USER: smtpuser@example.com
       MAIL_PASSWORD: secret
       MAIL_HOST: smtp.example.com
-      MAIL_PORT: 587  # contactbot only supports SMTP over TLS
+      MAIL_PORT: 587  # contactbot only supports SMTP with STARTTLS (RFC 6409)
+      # setting MAIL_PORT to 465 will not work as a standard TCP connection
+      # will be established to given SMTP server
     ports:
       - 8080:8080
