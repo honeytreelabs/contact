@@ -4,6 +4,13 @@ all: contact
 contact:
 	go build cmd/contact/contact.go
 
+.PHONY: podman
+podman:
+	podman build -t registry-rw.honeytreelabs.com/contact:latest .
+
+deploy: podman
+	podman push registry-rw.honeytreelabs.com/contact:latest
+
 .PHONY: test
 test:
 	go test ./...
