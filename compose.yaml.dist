@@ -1,0 +1,15 @@
+---
+services:
+  contact:
+    build:
+      context: .
+    restart: unless-stopped
+    environment:
+      MAIL_FROM: "contactbot@example.com"
+      MAIL_TO: "office@example.com"
+      MAIL_USER: smtpuser@example.com
+      MAIL_PASSWORD: secret
+      MAIL_HOST: smtp.example.com
+      MAIL_PORT: 587  # contactbot only supports SMTP over TLS
+    ports:
+      - 8080:8080
