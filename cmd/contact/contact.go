@@ -134,10 +134,10 @@ We have received a new contact request:
 User Message:
 '{userMessage}'
 `
-	raw = strings.Replace(raw, "{email}", msg.email, -1)
-	raw = strings.Replace(raw, "{userMessage}", msg.text, -1)
-	raw = strings.Replace(raw, "{sender}", cfg.Mail.From, -1)
-	raw = strings.Replace(raw, "{receiver}", cfg.Mail.To, -1)
+	raw = strings.ReplaceAll(raw, "{email}", msg.email)
+	raw = strings.ReplaceAll(raw, "{userMessage}", msg.text)
+	raw = strings.ReplaceAll(raw, "{sender}", cfg.Mail.From)
+	raw = strings.ReplaceAll(raw, "{receiver}", cfg.Mail.To)
 	auth := smtp.PlainAuth("", cfg.Mail.User, cfg.Mail.Password, cfg.Mail.Host)
 	err := smtp.SendMail(fmt.Sprintf("%s:%d", cfg.Mail.Host, cfg.Mail.Port),
 		auth,
