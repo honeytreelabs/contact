@@ -85,14 +85,19 @@ func (c ContactHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	userEmail := r.PostFormValue("email")
-	if userEmail == "" {
+	if userEmail == "" || isExcludedEmail(userEmail) {
 		http.Error(w, "Bad Request.", http.StatusBadRequest)
 		fmt.Printf("Email address not submitted.\n")
 		return
 	}
 
-	// message can be empty
+	// message must not be empty
 	userMessage := r.PostFormValue("message")
+	if userMessage == "" {
+		http.Error(w, "Bad Request.", http.StatusBadRequest)
+		fmt.Printf("No message given.\n")
+		return
+	}
 
 	bmSanitizer := bluemonday.StrictPolicy()
 	userMessage = bmSanitizer.Sanitize(userMessage)
@@ -110,6 +115,16 @@ func (c ContactHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	fmt.Fprintf(w, "Sent.")
+}
+
+func isExcludedEmail(email string) bool {
+	exclusions := []string{"@do-not-reply.", "dont-reply.me"}
+	for _, exclusion := range exclusions {
+		if strings.Contains(email, exclusion) {
+			return true
+		}
+	}
+	return false
 }
 
 // checking email addresses in go:
