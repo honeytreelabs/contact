@@ -4,6 +4,12 @@ services:
     build:
       context: .
     restart: unless-stopped
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 64
     environment:
       ACCESS_CONTROL_ALLOW_ORIGIN: "https://example.com"  # optional
       MAIL_FROM: "contactbot@example.com"
