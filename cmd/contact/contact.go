@@ -127,16 +127,30 @@ func isExcludedEmail(email string) bool {
 	return false
 }
 
+func parseMailboxAddress(input string) (string, error) {
+	if strings.ContainsAny(input, "\r\n") {
+		return "", fmt.Errorf("mail address contains a line break")
+	}
+	address, err := mail.ParseAddress(input)
+	if err != nil {
+		return "", err
+	}
+	if strings.ContainsAny(address.Address, "\r\n") {
+		return "", fmt.Errorf("mail address contains a line break")
+	}
+	return address.Address, nil
+}
+
 // checking email addresses in go:
 // - https://ayada.dev/posts/validate-email-address-in-go/
 // - https://pkg.go.dev/net/mail#ParseAddress
 func isEmailAddressValid(input string) bool {
-	address, err := mail.ParseAddress(input)
+	address, err := parseMailboxAddress(input)
 	if err != nil {
 		fmt.Printf("Cannot parse address: %v\n", err)
 		return false
 	}
-	domain := strings.Split(address.Address, "@")[1]
+	domain := strings.Split(address, "@")[1]
 	if mx, errLookup := net.LookupMX(domain); errLookup != nil || len(mx) == 0 {
 		fmt.Printf("Cannot lookup MX record: %v\n", errLookup)
 		return false
@@ -147,8 +161,20 @@ func isEmailAddressValid(input string) bool {
 // sending mails with golang:
 // - https://www.loginradius.com/blog/engineering/sending-emails-with-golang/
 func sendMail(cfg Config, msg Message) {
-	if !isEmailAddressValid(msg.email) {
+	userEmail, err := parseMailboxAddress(msg.email)
+	if err != nil || !isEmailAddressValid(userEmail) {
 		fmt.Printf("Cannot parse given email address: %s\n", msg.email)
+		return
+	}
+
+	sender, err := parseMailboxAddress(cfg.Mail.From)
+	if err != nil {
+		fmt.Printf("Cannot parse sender address: %v\n", err)
+		return
+	}
+	receiver, err := parseMailboxAddress(cfg.Mail.To)
+	if err != nil {
+		fmt.Printf("Cannot parse receiver address: %v\n", err)
 		return
 	}
 
@@ -164,15 +190,15 @@ We have received a new contact request:
 User Message:
 '{userMessage}'
 `
-	raw = strings.ReplaceAll(raw, "{email}", msg.email)
+	raw = strings.ReplaceAll(raw, "{email}", userEmail)
 	raw = strings.ReplaceAll(raw, "{userMessage}", msg.text)
-	raw = strings.ReplaceAll(raw, "{sender}", cfg.Mail.From)
-	raw = strings.ReplaceAll(raw, "{receiver}", cfg.Mail.To)
+	raw = strings.ReplaceAll(raw, "{sender}", sender)
+	raw = strings.ReplaceAll(raw, "{receiver}", receiver)
 	auth := smtp.PlainAuth("", cfg.Mail.User, cfg.Mail.Password, cfg.Mail.Host)
-	err := smtp.SendMail(fmt.Sprintf("%s:%d", cfg.Mail.Host, cfg.Mail.Port),
+	err = smtp.SendMail(fmt.Sprintf("%s:%d", cfg.Mail.Host, cfg.Mail.Port),
 		auth,
-		cfg.Mail.From,
-		[]string{cfg.Mail.To},
+		sender,
+		[]string{receiver},
 		[]byte(raw))
 	if err != nil {
 		fmt.Println(err)

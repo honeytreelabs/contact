@@ -22,6 +22,17 @@ func (s *ContactTestSuite) TestInvalidEmail() {
 	s.Require().False(isEmailAddressValid("Some One <some.one@339cjgfu349fgj40g.co9t049>"))
 }
 
+func (s *ContactTestSuite) TestMailboxAddressParsing() {
+	address, err := parseMailboxAddress("Some One <some.one@example.com>")
+	s.Require().NoError(err)
+	s.Require().Equal("some.one@example.com", address)
+}
+
+func (s *ContactTestSuite) TestMailboxAddressRejectsLineBreaks() {
+	_, err := parseMailboxAddress("some.one@example.com\r\nBcc: attacker@example.com")
+	s.Require().Error(err)
+}
+
 func (s *ContactTestSuite) TestExcludedEmail() {
 	s.Require().True(isExcludedEmail("@do-not-reply."))
 	s.Require().True(isExcludedEmail("Hello <hello@do-not-reply.com>"))
