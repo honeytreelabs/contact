@@ -33,6 +33,16 @@ type Config struct {
 	Mail                     ConfigEmail
 }
 
+func validateConfig(cfg Config) error {
+	if cfg.QueueLength <= 0 {
+		return fmt.Errorf("QUEUE_LENGTH must be greater than 0")
+	}
+	if cfg.RateLimitingWindow <= 0 {
+		return fmt.Errorf("RATE_LIMITING_WINDOW must be greater than 0")
+	}
+	return nil
+}
+
 type Message struct {
 	email string
 	text  string
@@ -233,6 +243,10 @@ func rateLimit(cfg Config, source MessageChannel, destination func(cfg Config, m
 func main() {
 	cfg := Config{}
 	if err := env.Parse(&cfg); err != nil {
+		fmt.Printf("%+v\n", err)
+		os.Exit(1)
+	}
+	if err := validateConfig(cfg); err != nil {
 		fmt.Printf("%+v\n", err)
 		os.Exit(1)
 	}

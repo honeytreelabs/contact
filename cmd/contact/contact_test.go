@@ -2,6 +2,7 @@ package main
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/suite"
 )
@@ -31,6 +32,28 @@ func (s *ContactTestSuite) TestMailboxAddressParsing() {
 func (s *ContactTestSuite) TestMailboxAddressRejectsLineBreaks() {
 	_, err := parseMailboxAddress("some.one@example.com\r\nBcc: attacker@example.com")
 	s.Require().Error(err)
+}
+
+func (s *ContactTestSuite) TestValidConfig() {
+	cfg := Config{
+		QueueLength:        1,
+		RateLimitingWindow: time.Second,
+	}
+	s.Require().NoError(validateConfig(cfg))
+}
+
+func (s *ContactTestSuite) TestInvalidConfig() {
+	cfg := Config{
+		QueueLength:        0,
+		RateLimitingWindow: time.Second,
+	}
+	s.Require().Error(validateConfig(cfg))
+
+	cfg = Config{
+		QueueLength:        1,
+		RateLimitingWindow: 0,
+	}
+	s.Require().Error(validateConfig(cfg))
 }
 
 func (s *ContactTestSuite) TestExcludedEmail() {
