@@ -218,10 +218,19 @@ func main() {
 		cfg:      cfg,
 	}
 	// Go HTTP server: https://zetcode.com/golang/http-server/
-	http.Handle(cfg.Path, contactHandler)
+	mux := http.NewServeMux()
+	mux.Handle(cfg.Path, contactHandler)
 	go rateLimit(cfg, contacts, sendMail)
 	// go rateLimit(cfg, contacts, func(_ Config, msg Message) {
 	// 	fmt.Printf("Contact received: %s\n", msg.info)
 	// })
-	log.Fatal(http.ListenAndServe(cfg.ListenAddress, nil))
+	server := http.Server{
+		Addr:              cfg.ListenAddress,
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       10 * time.Second,
+		WriteTimeout:      10 * time.Second,
+		IdleTimeout:       30 * time.Second,
+	}
+	log.Fatal(server.ListenAndServe())
 }
