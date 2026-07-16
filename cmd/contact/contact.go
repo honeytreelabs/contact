@@ -1,12 +1,15 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net"
 	"net/http"
 	"net/mail"
 	"net/smtp"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -14,6 +17,18 @@ import (
 	env "github.com/caarlos0/env/v6"
 	"github.com/microcosm-cc/bluemonday"
 )
+
+const (
+	maxRequestBodyBytes = 16 * 1024
+	maxCapTokenLength   = 4096
+)
+
+var captchaHTTPClient = &http.Client{
+	Timeout: 5 * time.Second,
+	CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+		return http.ErrUseLastResponse
+	},
+}
 
 type ConfigEmail struct {
 	From     string `env:"MAIL_FROM,notEmpty"`
@@ -24,6 +39,13 @@ type ConfigEmail struct {
 	Port     uint16 `env:"MAIL_PORT,notEmpty"`
 }
 
+type ConfigCaptcha struct {
+	Enabled       bool          `env:"CAP_ENABLED" envDefault:"false"`
+	APIEndpoint   string        `env:"CAP_API_ENDPOINT"`
+	Secret        string        `env:"CAP_SECRET"`
+	VerifyTimeout time.Duration `env:"CAP_VERIFY_TIMEOUT" envDefault:"5s"`
+}
+
 type Config struct {
 	ListenAddress            string        `env:"LISTEN_ADDRESS" envDefault:":8080"`
 	QueueLength              int           `env:"QUEUE_LENGTH" envDefault:"5"`
@@ -31,6 +53,7 @@ type Config struct {
 	Path                     string        `env:"URL_PATH" envDefault:"/contact"`
 	AccessControlAllowOrigin string        `env:"ACCESS_CONTROL_ALLOW_ORIGIN" envDefault:""`
 	Mail                     ConfigEmail
+	Captcha                  ConfigCaptcha
 }
 
 func validateConfig(cfg Config) error {
@@ -39,6 +62,34 @@ func validateConfig(cfg Config) error {
 	}
 	if cfg.RateLimitingWindow <= 0 {
 		return fmt.Errorf("RATE_LIMITING_WINDOW must be greater than 0")
+	}
+	if cfg.Captcha.VerifyTimeout <= 0 {
+		return fmt.Errorf("CAP_VERIFY_TIMEOUT must be greater than 0")
+	}
+	if cfg.Captcha.Enabled {
+		if cfg.Captcha.APIEndpoint == "" {
+			return fmt.Errorf("CAP_API_ENDPOINT must be set when CAP_ENABLED is true")
+		}
+		if cfg.Captcha.Secret == "" {
+			return fmt.Errorf("CAP_SECRET must be set when CAP_ENABLED is true")
+		}
+		if err := validateHTTPURL(cfg.Captcha.APIEndpoint); err != nil {
+			return fmt.Errorf("CAP_API_ENDPOINT is invalid: %w", err)
+		}
+	}
+	return nil
+}
+
+func validateHTTPURL(input string) error {
+	parsed, err := url.Parse(input)
+	if err != nil {
+		return err
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return fmt.Errorf("scheme must be http or https")
+	}
+	if parsed.Host == "" {
+		return fmt.Errorf("host must be set")
 	}
 	return nil
 }
@@ -53,6 +104,99 @@ type MessageChannel chan Message
 type ContactHandler struct {
 	cfg      Config
 	contacts MessageChannel
+}
+
+type captchaVerificationError struct {
+	statusCode int
+	message    string
+}
+
+func (e captchaVerificationError) Error() string {
+	return e.message
+}
+
+type captchaVerifyRequest struct {
+	Secret   string `json:"secret"`
+	Response string `json:"response"`
+}
+
+type captchaVerifyResponse struct {
+	Success bool `json:"success"`
+}
+
+func verifyCaptchaToken(cfg ConfigCaptcha, token string) error {
+	if !cfg.Enabled {
+		return nil
+	}
+
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return captchaVerificationError{
+			statusCode: http.StatusBadRequest,
+			message:    "CAPTCHA token is required",
+		}
+	}
+	if len(token) > maxCapTokenLength {
+		return captchaVerificationError{
+			statusCode: http.StatusBadRequest,
+			message:    "CAPTCHA token is too long",
+		}
+	}
+
+	payload, err := json.Marshal(captchaVerifyRequest{
+		Secret:   cfg.Secret,
+		Response: token,
+	})
+	if err != nil {
+		return err
+	}
+
+	request, err := http.NewRequest(
+		http.MethodPost,
+		strings.TrimRight(cfg.APIEndpoint, "/")+"/siteverify",
+		bytes.NewReader(payload),
+	)
+	if err != nil {
+		return captchaVerificationError{
+			statusCode: http.StatusServiceUnavailable,
+			message:    "CAPTCHA verification is unavailable",
+		}
+	}
+	request.Header.Set("Content-Type", "application/json")
+
+	client := *captchaHTTPClient
+	client.Timeout = cfg.VerifyTimeout
+	response, err := client.Do(request)
+	if err != nil {
+		return captchaVerificationError{
+			statusCode: http.StatusServiceUnavailable,
+			message:    "CAPTCHA verification is unavailable",
+		}
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		return captchaVerificationError{
+			statusCode: http.StatusServiceUnavailable,
+			message:    "CAPTCHA verification is unavailable",
+		}
+	}
+
+	var result captchaVerifyResponse
+	if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
+		return captchaVerificationError{
+			statusCode: http.StatusServiceUnavailable,
+			message:    "CAPTCHA verification is unavailable",
+		}
+	}
+	if !result.Success {
+		return captchaVerificationError{
+			statusCode: http.StatusBadRequest,
+			message:    "CAPTCHA verification failed",
+		}
+	}
+
+	return nil
 }
 
 func (c ContactHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -81,7 +225,7 @@ func (c ContactHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// not using ioutil.ReadAll here: https://haisum.github.io/2017/09/11/golang-ioutil-readall/
-	r.Body = http.MaxBytesReader(w, r.Body, 512)
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "Bad Request.", http.StatusBadRequest)
 		fmt.Printf("Cannot parse form: %v\n", err)
@@ -111,6 +255,19 @@ func (c ContactHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	bmSanitizer := bluemonday.StrictPolicy()
 	userMessage = bmSanitizer.Sanitize(userMessage)
+
+	if err := verifyCaptchaToken(c.cfg.Captcha, r.PostFormValue("cap-token")); err != nil {
+		captchaErr, ok := err.(captchaVerificationError)
+		if !ok {
+			captchaErr = captchaVerificationError{
+				statusCode: http.StatusServiceUnavailable,
+				message:    "CAPTCHA verification is unavailable",
+			}
+		}
+		http.Error(w, captchaErr.message, captchaErr.statusCode)
+		fmt.Printf("CAPTCHA verification failed: %v\n", err)
+		return
+	}
 
 	// Non-Blocking Channel Operations: https://gobyexample.com/non-blocking-channel-operations
 	select {

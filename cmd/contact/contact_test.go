@@ -1,6 +1,11 @@
 package main
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -9,6 +14,17 @@ import (
 
 type ContactTestSuite struct {
 	suite.Suite
+}
+
+func testConfig() Config {
+	return Config{
+		QueueLength:        1,
+		RateLimitingWindow: time.Second,
+		Path:               "/contact",
+		Captcha: ConfigCaptcha{
+			VerifyTimeout: time.Second,
+		},
+	}
 }
 
 func (s *ContactTestSuite) TestValidEmail() {
@@ -35,25 +51,177 @@ func (s *ContactTestSuite) TestMailboxAddressRejectsLineBreaks() {
 }
 
 func (s *ContactTestSuite) TestValidConfig() {
-	cfg := Config{
-		QueueLength:        1,
-		RateLimitingWindow: time.Second,
-	}
+	cfg := testConfig()
 	s.Require().NoError(validateConfig(cfg))
 }
 
 func (s *ContactTestSuite) TestInvalidConfig() {
-	cfg := Config{
-		QueueLength:        0,
-		RateLimitingWindow: time.Second,
-	}
+	cfg := testConfig()
+	cfg.QueueLength = 0
 	s.Require().Error(validateConfig(cfg))
 
-	cfg = Config{
-		QueueLength:        1,
-		RateLimitingWindow: 0,
-	}
+	cfg = testConfig()
+	cfg.RateLimitingWindow = 0
 	s.Require().Error(validateConfig(cfg))
+
+	cfg = testConfig()
+	cfg.Captcha.VerifyTimeout = 0
+	s.Require().Error(validateConfig(cfg))
+
+	cfg = testConfig()
+	cfg.Captcha.Enabled = true
+	cfg.Captcha.APIEndpoint = ""
+	cfg.Captcha.Secret = "secret"
+	s.Require().Error(validateConfig(cfg))
+
+	cfg = testConfig()
+	cfg.Captcha.Enabled = true
+	cfg.Captcha.APIEndpoint = "https://cap.example.com/site-key/"
+	cfg.Captcha.Secret = ""
+	s.Require().Error(validateConfig(cfg))
+
+	cfg = testConfig()
+	cfg.Captcha.Enabled = true
+	cfg.Captcha.APIEndpoint = "ftp://cap.example.com/site-key/"
+	cfg.Captcha.Secret = "secret"
+	s.Require().Error(validateConfig(cfg))
+}
+
+func (s *ContactTestSuite) TestVerifyCaptchaTokenDisabled() {
+	s.Require().NoError(verifyCaptchaToken(ConfigCaptcha{}, ""))
+}
+
+func (s *ContactTestSuite) TestVerifyCaptchaTokenRejectsMissingToken() {
+	err := verifyCaptchaToken(ConfigCaptcha{
+		Enabled:       true,
+		APIEndpoint:   "https://cap.example.com/site-key/",
+		Secret:        "secret",
+		VerifyTimeout: time.Second,
+	}, "")
+	s.Require().Error(err)
+	s.Require().Equal(http.StatusBadRequest, err.(captchaVerificationError).statusCode)
+}
+
+func (s *ContactTestSuite) TestVerifyCaptchaTokenRejectsOversizedToken() {
+	err := verifyCaptchaToken(ConfigCaptcha{
+		Enabled:       true,
+		APIEndpoint:   "https://cap.example.com/site-key/",
+		Secret:        "secret",
+		VerifyTimeout: time.Second,
+	}, strings.Repeat("a", maxCapTokenLength+1))
+	s.Require().Error(err)
+	s.Require().Equal(http.StatusBadRequest, err.(captchaVerificationError).statusCode)
+}
+
+func (s *ContactTestSuite) TestVerifyCaptchaTokenAcceptsSuccessfulVerification() {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		s.Require().Equal(http.MethodPost, r.Method)
+		s.Require().Equal("/site-key/siteverify", r.URL.Path)
+		s.Require().Equal("application/json", r.Header.Get("Content-Type"))
+
+		var payload captchaVerifyRequest
+		s.Require().NoError(json.NewDecoder(r.Body).Decode(&payload))
+		s.Require().Equal("secret", payload.Secret)
+		s.Require().Equal("good-token", payload.Response)
+
+		w.Header().Set("Content-Type", "application/json")
+		_, err := w.Write([]byte(`{"success":true}`))
+		s.Require().NoError(err)
+	}))
+	defer server.Close()
+
+	err := verifyCaptchaToken(ConfigCaptcha{
+		Enabled:       true,
+		APIEndpoint:   server.URL + "/site-key/",
+		Secret:        "secret",
+		VerifyTimeout: time.Second,
+	}, "good-token")
+	s.Require().NoError(err)
+}
+
+func (s *ContactTestSuite) TestVerifyCaptchaTokenRejectsFailedVerification() {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, err := w.Write([]byte(`{"success":false}`))
+		s.Require().NoError(err)
+	}))
+	defer server.Close()
+
+	err := verifyCaptchaToken(ConfigCaptcha{
+		Enabled:       true,
+		APIEndpoint:   server.URL,
+		Secret:        "secret",
+		VerifyTimeout: time.Second,
+	}, "bad-token")
+	s.Require().Error(err)
+	s.Require().Equal(http.StatusBadRequest, err.(captchaVerificationError).statusCode)
+}
+
+func (s *ContactTestSuite) TestVerifyCaptchaTokenFailsClosedWhenUnavailable() {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "unavailable", http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	err := verifyCaptchaToken(ConfigCaptcha{
+		Enabled:       true,
+		APIEndpoint:   server.URL,
+		Secret:        "secret",
+		VerifyTimeout: time.Second,
+	}, "token")
+	s.Require().Error(err)
+	s.Require().Equal(http.StatusServiceUnavailable, err.(captchaVerificationError).statusCode)
+}
+
+func (s *ContactTestSuite) TestContactHandlerAcceptsFormWhenCaptchaDisabled() {
+	handler := ContactHandler{
+		cfg:      testConfig(),
+		contacts: make(MessageChannel, 1),
+	}
+
+	request := httptest.NewRequest(http.MethodPost, "/contact", strings.NewReader(validContactForm("").Encode()))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	response := httptest.NewRecorder()
+
+	handler.ServeHTTP(response, request)
+
+	s.Require().Equal(http.StatusOK, response.Code)
+	s.Require().Equal("Sent.", response.Body.String())
+	s.Require().Len(handler.contacts, 1)
+}
+
+func (s *ContactTestSuite) TestContactHandlerRequiresCaptchaTokenWhenEnabled() {
+	cfg := testConfig()
+	cfg.Captcha = ConfigCaptcha{
+		Enabled:       true,
+		APIEndpoint:   "https://cap.example.com/site-key/",
+		Secret:        "secret",
+		VerifyTimeout: time.Second,
+	}
+	handler := ContactHandler{
+		cfg:      cfg,
+		contacts: make(MessageChannel, 1),
+	}
+
+	request := httptest.NewRequest(http.MethodPost, "/contact", strings.NewReader(validContactForm("").Encode()))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	response := httptest.NewRecorder()
+
+	handler.ServeHTTP(response, request)
+
+	s.Require().Equal(http.StatusBadRequest, response.Code)
+	s.Require().Len(handler.contacts, 0)
+}
+
+func validContactForm(capToken string) url.Values {
+	form := url.Values{}
+	form.Set("email", "sender@example.com")
+	form.Set("message", "hello")
+	form.Set("contact-dsgvo-checkbox", "on")
+	if capToken != "" {
+		form.Set("cap-token", capToken)
+	}
+	return form
 }
 
 func (s *ContactTestSuite) TestExcludedEmail() {
