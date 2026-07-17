@@ -14,6 +14,7 @@ import (
 	"os"
 	"strings"
 	"time"
+	"unicode"
 
 	env "github.com/caarlos0/env/v6"
 	"github.com/microcosm-cc/bluemonday"
@@ -52,7 +53,8 @@ type Config struct {
 	QueueLength              int           `env:"QUEUE_LENGTH" envDefault:"5"`
 	RateLimitingWindow       time.Duration `env:"RATE_LIMITING_WINDOW" envDefault:"5s"`
 	Path                     string        `env:"URL_PATH" envDefault:"/contact"`
-	AccessControlAllowOrigin string        `env:"ACCESS_CONTROL_ALLOW_ORIGIN" envDefault:""`
+	AccessControlAllowOrigin  string        `env:"ACCESS_CONTROL_ALLOW_ORIGIN" envDefault:""`
+	AccessControlAllowOrigins string        `env:"ACCESS_CONTROL_ALLOW_ORIGINS" envDefault:""`
 	Mail                     ConfigEmail
 	Captcha                  ConfigCaptcha
 }
@@ -201,11 +203,12 @@ func verifyCaptchaToken(cfg ConfigCaptcha, token string) error {
 }
 
 func (c ContactHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if c.cfg.AccessControlAllowOrigin != "" {
-		w.Header().Set("Access-Control-Allow-Origin", c.cfg.AccessControlAllowOrigin)
+	if allowOrigin := allowedCORSOrigin(c.cfg, r.Header.Get("Origin")); allowOrigin != "" {
+		w.Header().Set("Access-Control-Allow-Origin", allowOrigin)
 		w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 		w.Header().Set("Access-Control-Max-Age", "3600")
+		w.Header().Add("Vary", "Origin")
 	}
 
 	if r.Method == http.MethodOptions {
@@ -287,6 +290,42 @@ func (c ContactHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func sanitizePlainTextMessage(input string) string {
 	bmSanitizer := bluemonday.StrictPolicy()
 	return html.UnescapeString(bmSanitizer.Sanitize(input))
+}
+
+func allowedCORSOrigin(cfg Config, requestOrigin string) string {
+	if requestOrigin == "" {
+		return ""
+	}
+
+	for _, allowedOrigin := range parseCORSOrigins(cfg.AccessControlAllowOrigin, cfg.AccessControlAllowOrigins) {
+		if requestOrigin == allowedOrigin {
+			return requestOrigin
+		}
+	}
+
+	return ""
+}
+
+func parseCORSOrigins(values ...string) []string {
+	seen := map[string]struct{}{}
+	origins := []string{}
+
+	for _, value := range values {
+		for _, origin := range strings.FieldsFunc(value, func(r rune) bool {
+			return r == ',' || unicode.IsSpace(r)
+		}) {
+			if origin == "" {
+				continue
+			}
+			if _, exists := seen[origin]; exists {
+				continue
+			}
+			seen[origin] = struct{}{}
+			origins = append(origins, origin)
+		}
+	}
+
+	return origins
 }
 
 func isExcludedEmail(email string) bool {

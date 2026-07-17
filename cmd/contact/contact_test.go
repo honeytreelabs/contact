@@ -209,6 +209,63 @@ func (s *ContactTestSuite) TestContactHandlerPreservesPlainTextPunctuation() {
 	s.Require().Equal("Hallo, wie geht's?", (<-handler.contacts).text)
 }
 
+func (s *ContactTestSuite) TestContactHandlerAllowsConfiguredCORSOrigin() {
+	cfg := testConfig()
+	cfg.AccessControlAllowOrigins = "https://embedded-focus.com, https://preview.embedded-focus.com"
+	handler := ContactHandler{
+		cfg:      cfg,
+		contacts: make(MessageChannel, 1),
+	}
+
+	request := httptest.NewRequest(http.MethodOptions, "/contact", nil)
+	request.Header.Set("Origin", "https://preview.embedded-focus.com")
+	response := httptest.NewRecorder()
+
+	handler.ServeHTTP(response, request)
+
+	s.Require().Equal(http.StatusNoContent, response.Code)
+	s.Require().Equal("https://preview.embedded-focus.com", response.Header().Get("Access-Control-Allow-Origin"))
+	s.Require().Equal("POST, OPTIONS", response.Header().Get("Access-Control-Allow-Methods"))
+	s.Require().Equal("Content-Type", response.Header().Get("Access-Control-Allow-Headers"))
+	s.Require().Contains(response.Header().Values("Vary"), "Origin")
+}
+
+func (s *ContactTestSuite) TestContactHandlerRejectsUnconfiguredCORSOrigin() {
+	cfg := testConfig()
+	cfg.AccessControlAllowOrigins = "https://embedded-focus.com, https://preview.embedded-focus.com"
+	handler := ContactHandler{
+		cfg:      cfg,
+		contacts: make(MessageChannel, 1),
+	}
+
+	request := httptest.NewRequest(http.MethodOptions, "/contact", nil)
+	request.Header.Set("Origin", "https://attacker.example")
+	response := httptest.NewRecorder()
+
+	handler.ServeHTTP(response, request)
+
+	s.Require().Equal(http.StatusNoContent, response.Code)
+	s.Require().Empty(response.Header().Get("Access-Control-Allow-Origin"))
+}
+
+func (s *ContactTestSuite) TestContactHandlerKeepsLegacySingleCORSOrigin() {
+	cfg := testConfig()
+	cfg.AccessControlAllowOrigin = "https://embedded-focus.com"
+	handler := ContactHandler{
+		cfg:      cfg,
+		contacts: make(MessageChannel, 1),
+	}
+
+	request := httptest.NewRequest(http.MethodOptions, "/contact", nil)
+	request.Header.Set("Origin", "https://embedded-focus.com")
+	response := httptest.NewRecorder()
+
+	handler.ServeHTTP(response, request)
+
+	s.Require().Equal(http.StatusNoContent, response.Code)
+	s.Require().Equal("https://embedded-focus.com", response.Header().Get("Access-Control-Allow-Origin"))
+}
+
 func (s *ContactTestSuite) TestPlainTextMessageSanitizationStripsHTMLTags() {
 	s.Require().Equal(
 		"Hello alert('x') world",
