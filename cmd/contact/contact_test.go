@@ -190,6 +190,32 @@ func (s *ContactTestSuite) TestContactHandlerAcceptsFormWhenCaptchaDisabled() {
 	s.Require().Len(handler.contacts, 1)
 }
 
+func (s *ContactTestSuite) TestContactHandlerPreservesPlainTextPunctuation() {
+	handler := ContactHandler{
+		cfg:      testConfig(),
+		contacts: make(MessageChannel, 1),
+	}
+	form := validContactForm("")
+	form.Set("message", "Hallo, wie geht's?")
+
+	request := httptest.NewRequest(http.MethodPost, "/contact", strings.NewReader(form.Encode()))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	response := httptest.NewRecorder()
+
+	handler.ServeHTTP(response, request)
+
+	s.Require().Equal(http.StatusOK, response.Code)
+	s.Require().Len(handler.contacts, 1)
+	s.Require().Equal("Hallo, wie geht's?", (<-handler.contacts).text)
+}
+
+func (s *ContactTestSuite) TestPlainTextMessageSanitizationStripsHTMLTags() {
+	s.Require().Equal(
+		"Hello alert('x') world",
+		sanitizePlainTextMessage("Hello <script>alert('x')</script> <strong>world</strong>"),
+	)
+}
+
 func (s *ContactTestSuite) TestContactHandlerRequiresCaptchaTokenWhenEnabled() {
 	cfg := testConfig()
 	cfg.Captcha = ConfigCaptcha{

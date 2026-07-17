@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"html"
 	"log"
 	"net"
 	"net/http"
@@ -253,8 +254,7 @@ func (c ContactHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	bmSanitizer := bluemonday.StrictPolicy()
-	userMessage = bmSanitizer.Sanitize(userMessage)
+	userMessage = sanitizePlainTextMessage(userMessage)
 
 	if err := verifyCaptchaToken(c.cfg.Captcha, r.PostFormValue("cap-token")); err != nil {
 		captchaErr, ok := err.(captchaVerificationError)
@@ -282,6 +282,11 @@ func (c ContactHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	fmt.Fprintf(w, "Sent.")
+}
+
+func sanitizePlainTextMessage(input string) string {
+	bmSanitizer := bluemonday.StrictPolicy()
+	return html.UnescapeString(bmSanitizer.Sanitize(input))
 }
 
 func isExcludedEmail(email string) bool {
