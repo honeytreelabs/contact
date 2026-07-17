@@ -1,8 +1,5 @@
-GIT_TAG := $(shell git describe --tag)
-
-ifeq ($(GIT_TAG),)
-  $(error GIT_TAG is empty. Please ensure you are in a Git repository with tags.)
-endif
+IMAGE   ?= registry-rw.honeytreelabs.com/contact
+TAG     ?= v1.0.0
 
 all: build
 
@@ -22,14 +19,13 @@ test:
 
 ## container targets
 
-.PHONY: build
+.PHONY: build release push
 build:
-	podman build -t registry-rw.honeytreelabs.com/contact .
+	podman build -t $(IMAGE):$(TAG) .
 
 release: build
-	podman tag registry-rw.honeytreelabs.com/contact registry-rw.honeytreelabs.com/contact:latest
-	podman tag registry-rw.honeytreelabs.com/contact registry-rw.honeytreelabs.com/contact:$(GIT_TAG)
+	podman tag $(IMAGE):$(TAG) $(IMAGE):latest
 
-deploy: release
-	podman push registry-rw.honeytreelabs.com/contact:latest
-	podman push registry-rw.honeytreelabs.com/contact:$(GIT_TAG)
+push: release
+	podman push $(IMAGE):latest
+	podman push $(IMAGE):$(TAG)
