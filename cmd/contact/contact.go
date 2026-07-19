@@ -14,6 +14,7 @@ import (
 	"net/smtp"
 	"net/url"
 	"os"
+	"runtime/debug"
 	"strings"
 	"time"
 	"unicode"
@@ -33,6 +34,8 @@ var captchaHTTPClient = &http.Client{
 		return http.ErrUseLastResponse
 	},
 }
+
+var buildCommit = "unknown"
 
 type ConfigEmail struct {
 	From     string `env:"MAIL_FROM,notEmpty"`
@@ -170,8 +173,9 @@ func remoteIP(remoteAddr string) string {
 
 func logRequestEvent(event string, req requestMetadata, email string) {
 	fmt.Printf(
-		"event=%q request_id=%q email=%q remote_addr=%q x_forwarded_for=%q x_real_ip=%q user_agent=%q origin=%q referer=%q\n",
+		"event=%q service_revision=%q request_id=%q email=%q remote_addr=%q x_forwarded_for=%q x_real_ip=%q user_agent=%q origin=%q referer=%q\n",
 		event,
+		serviceRevision(),
 		req.id,
 		email,
 		req.remoteAddr,
@@ -558,6 +562,7 @@ func main() {
 		fmt.Printf("%+v\n", err)
 		os.Exit(1)
 	}
+	fmt.Printf("event=%q service_revision=%q listen_address=%q url_path=%q captcha_enabled=%t\n", "ContactBot starting", serviceRevision(), cfg.ListenAddress, cfg.Path, cfg.Captcha.Enabled)
 
 	// Length and capacity of a channel in go: https://golangbyexample.com/length-and-capacity-channel-golang/
 	contacts := make(MessageChannel, cfg.QueueLength)

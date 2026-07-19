@@ -1,5 +1,6 @@
 IMAGE   ?= registry-rw.honeytreelabs.com/contact
 TAG     ?= v1.0.0
+GIT_COMMIT ?= $(shell git rev-parse --short=12 HEAD 2>/dev/null || echo unknown)
 
 all: build
 
@@ -21,7 +22,7 @@ test:
 
 .PHONY: build release push
 build:
-	podman build -t $(IMAGE):$(TAG) .
+	podman build --build-arg GIT_COMMIT=$(GIT_COMMIT) -t $(IMAGE):$(TAG) .
 
 release: build
 	podman tag $(IMAGE):$(TAG) $(IMAGE):latest
