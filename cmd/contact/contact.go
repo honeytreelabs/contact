@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"html"
@@ -98,8 +100,9 @@ func validateHTTPURL(input string) error {
 }
 
 type Message struct {
-	email string
-	text  string
+	email   string
+	text    string
+	request requestMetadata
 }
 
 type MessageChannel chan Message
@@ -125,6 +128,104 @@ type captchaVerifyRequest struct {
 
 type captchaVerifyResponse struct {
 	Success bool `json:"success"`
+}
+
+type requestMetadata struct {
+	id            string
+	remoteAddr    string
+	xForwardedFor string
+	xRealIP       string
+	userAgent     string
+	origin        string
+	referer       string
+}
+
+func newRequestMetadata(r *http.Request) requestMetadata {
+	return requestMetadata{
+		id:            newRequestID(),
+		remoteAddr:    remoteIP(r.RemoteAddr),
+		xForwardedFor: r.Header.Get("X-Forwarded-For"),
+		xRealIP:       r.Header.Get("X-Real-IP"),
+		userAgent:     r.UserAgent(),
+		origin:        r.Header.Get("Origin"),
+		referer:       r.Referer(),
+	}
+}
+
+func newRequestID() string {
+	var raw [16]byte
+	if _, err := rand.Read(raw[:]); err != nil {
+		return fmt.Sprintf("%d", time.Now().UnixNano())
+	}
+	return hex.EncodeToString(raw[:])
+}
+
+func remoteIP(remoteAddr string) string {
+	host, _, err := net.SplitHostPort(remoteAddr)
+	if err != nil {
+		return remoteAddr
+	}
+	return host
+}
+
+func logRequestEvent(event string, req requestMetadata, email string) {
+	fmt.Printf(
+		"event=%q request_id=%q email=%q remote_addr=%q x_forwarded_for=%q x_real_ip=%q user_agent=%q origin=%q referer=%q\n",
+		event,
+		req.id,
+		email,
+		req.remoteAddr,
+		req.xForwardedFor,
+		req.xRealIP,
+		req.userAgent,
+		req.origin,
+		req.referer,
+	)
+}
+
+func logRequestError(event string, req requestMetadata, email string, err error) {
+	fmt.Printf(
+		"event=%q service_revision=%q request_id=%q email=%q remote_addr=%q x_forwarded_for=%q x_real_ip=%q user_agent=%q origin=%q referer=%q error=%q\n",
+		event,
+		serviceRevision(),
+		req.id,
+		email,
+		req.remoteAddr,
+		req.xForwardedFor,
+		req.xRealIP,
+		req.userAgent,
+		req.origin,
+		req.referer,
+		err.Error(),
+	)
+}
+
+func serviceRevision() string {
+	if buildCommit != "" && buildCommit != "unknown" {
+		return buildCommit
+	}
+
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return buildCommit
+	}
+
+	revision := buildCommit
+	modified := false
+	for _, setting := range info.Settings {
+		switch setting.Key {
+		case "vcs.revision":
+			if setting.Value != "" {
+				revision = setting.Value
+			}
+		case "vcs.modified":
+			modified = setting.Value == "true"
+		}
+	}
+	if modified && revision != "" && revision != "unknown" {
+		return revision + "+modified"
+	}
+	return revision
 }
 
 func verifyCaptchaToken(cfg ConfigCaptcha, token string) error {
@@ -203,6 +304,8 @@ func verifyCaptchaToken(cfg ConfigCaptcha, token string) error {
 }
 
 func (c ContactHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	request := newRequestMetadata(r)
+
 	if allowOrigin := allowedCORSOrigin(c.cfg, r.Header.Get("Origin")); allowOrigin != "" {
 		w.Header().Set("Access-Control-Allow-Origin", allowOrigin)
 		w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
@@ -268,15 +371,19 @@ func (c ContactHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		http.Error(w, captchaErr.message, captchaErr.statusCode)
-		fmt.Printf("CAPTCHA verification failed: %v\n", err)
+		logRequestError("CAPTCHA verification failed", request, userEmail, err)
 		return
+	}
+	if c.cfg.Captcha.Enabled {
+		logRequestEvent("CAPTCHA verification succeeded", request, userEmail)
 	}
 
 	// Non-Blocking Channel Operations: https://gobyexample.com/non-blocking-channel-operations
 	select {
 	case c.contacts <- Message{
-		email: userEmail,
-		text:  userMessage,
+		email:   userEmail,
+		text:    userMessage,
+		request: request,
 	}:
 		break
 	default:
@@ -415,7 +522,7 @@ User Message:
 		fmt.Println(err)
 		return
 	}
-	fmt.Printf("Email sent successfully for %s\n", msg.email)
+	logRequestEvent("Email sent successfully", msg.request, msg.email)
 }
 
 // rateLimit reads out of the queue of email addresses

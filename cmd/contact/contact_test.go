@@ -209,6 +209,36 @@ func (s *ContactTestSuite) TestContactHandlerPreservesPlainTextPunctuation() {
 	s.Require().Equal("Hallo, wie geht's?", (<-handler.contacts).text)
 }
 
+func (s *ContactTestSuite) TestContactHandlerStoresRequestMetadata() {
+	handler := ContactHandler{
+		cfg:      testConfig(),
+		contacts: make(MessageChannel, 1),
+	}
+
+	request := httptest.NewRequest(http.MethodPost, "/contact", strings.NewReader(validContactForm("").Encode()))
+	request.RemoteAddr = "203.0.113.10:12345"
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	request.Header.Set("X-Forwarded-For", "198.51.100.20")
+	request.Header.Set("X-Real-IP", "198.51.100.21")
+	request.Header.Set("User-Agent", "contact-test-agent")
+	request.Header.Set("Origin", "https://embedded-focus.com")
+	request.Header.Set("Referer", "https://embedded-focus.com/contact/")
+	response := httptest.NewRecorder()
+
+	handler.ServeHTTP(response, request)
+
+	s.Require().Equal(http.StatusOK, response.Code)
+	s.Require().Len(handler.contacts, 1)
+	message := <-handler.contacts
+	s.Require().NotEmpty(message.request.id)
+	s.Require().Equal("203.0.113.10", message.request.remoteAddr)
+	s.Require().Equal("198.51.100.20", message.request.xForwardedFor)
+	s.Require().Equal("198.51.100.21", message.request.xRealIP)
+	s.Require().Equal("contact-test-agent", message.request.userAgent)
+	s.Require().Equal("https://embedded-focus.com", message.request.origin)
+	s.Require().Equal("https://embedded-focus.com/contact/", message.request.referer)
+}
+
 func (s *ContactTestSuite) TestContactHandlerAllowsConfiguredCORSOrigin() {
 	cfg := testConfig()
 	cfg.AccessControlAllowOrigins = "https://embedded-focus.com, https://preview.embedded-focus.com"
