@@ -1,4 +1,4 @@
-image: docker:20.10
+image: docker:29.6.1
 
 variables:
   # When you use the dind service, you must instruct Docker to talk with
@@ -18,7 +18,7 @@ variables:
   DOCKER_TLS_CERTDIR: "/certs"
 
 services:
-  - docker:20.10-dind
+  - docker:29.6.1-dind
 
 before_script:
   - docker info
