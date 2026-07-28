@@ -298,9 +298,69 @@ func (s *ContactTestSuite) TestContactHandlerKeepsLegacySingleCORSOrigin() {
 
 func (s *ContactTestSuite) TestPlainTextMessageSanitizationStripsHTMLTags() {
 	s.Require().Equal(
-		"Hello alert('x') world",
+		"Hello  world",
 		sanitizePlainTextMessage("Hello <script>alert('x')</script> <strong>world</strong>"),
 	)
+}
+
+func (s *ContactTestSuite) TestLowQualityMessageDetectionRejectsSpamSamples() {
+	spamMessages := []string{
+		"diSoFZsFaSfrdwaEfTzykIf",
+		"RCkvCvEXlcNiIksWtLfsXvS",
+		"RVLlOWVVGEPxZlmDfwaXHg",
+		"XtHKDAfmDUYjUvgOh",
+		"ZlmqmROnZHLMVDepp",
+		"mxtVQBkEpvYyBenmV",
+		"SDkzTgHPuBCUgOGLOiaMrEo",
+	}
+
+	for _, message := range spamMessages {
+		s.Require().True(isLowQualityMessage(message), message)
+	}
+}
+
+func (s *ContactTestSuite) TestLowQualityMessageDetectionAllowsUsefulMessages() {
+	usefulMessages := []string{
+		"Please call me.",
+		"Hallo, wie geht's?",
+		"I am interested in consulting.",
+		"https://example.com/problem",
+		"CallbackPlease",
+	}
+
+	for _, message := range usefulMessages {
+		s.Require().False(isLowQualityMessage(message), message)
+	}
+}
+
+func (s *ContactTestSuite) TestLowQualityMessageDetectionRejectsVeryShortMessages() {
+	s.Require().True(isLowQualityMessage("hello"))
+	s.Require().True(isLowQualityMessage("test"))
+}
+
+func (s *ContactTestSuite) TestLowQualityMessageDetectionRejectsModerateCaseTransitionSpam() {
+	message := "ZlmqmROnZHLMVDepp"
+
+	s.Require().Greater(asciiCaseTransitionRatio(message), randomTextCaseTransitionRate)
+	s.Require().True(isLowQualityMessage(message))
+}
+
+func (s *ContactTestSuite) TestContactHandlerRejectsLowQualityMessages() {
+	handler := ContactHandler{
+		cfg:      testConfig(),
+		contacts: make(MessageChannel, 1),
+	}
+	form := validContactForm("")
+	form.Set("message", "XtHKDAfmDUYjUvgOh")
+
+	request := httptest.NewRequest(http.MethodPost, "/contact", strings.NewReader(form.Encode()))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	response := httptest.NewRecorder()
+
+	handler.ServeHTTP(response, request)
+
+	s.Require().Equal(http.StatusBadRequest, response.Code)
+	s.Require().Len(handler.contacts, 0)
 }
 
 func (s *ContactTestSuite) TestContactHandlerRequiresCaptchaTokenWhenEnabled() {
@@ -329,7 +389,7 @@ func (s *ContactTestSuite) TestContactHandlerRequiresCaptchaTokenWhenEnabled() {
 func validContactForm(capToken string) url.Values {
 	form := url.Values{}
 	form.Set("email", "sender@example.com")
-	form.Set("message", "hello")
+	form.Set("message", "Please contact me.")
 	form.Set("contact-dsgvo-checkbox", "on")
 	if capToken != "" {
 		form.Set("cap-token", capToken)

@@ -24,8 +24,9 @@ import (
 )
 
 const (
-	maxRequestBodyBytes = 16 * 1024
-	maxCapTokenLength   = 4096
+	maxRequestBodyBytes          = 16 * 1024
+	maxCapTokenLength            = 4096
+	randomTextCaseTransitionRate = 0.30
 )
 
 var captchaHTTPClient = &http.Client{
@@ -54,14 +55,14 @@ type ConfigCaptcha struct {
 }
 
 type Config struct {
-	ListenAddress            string        `env:"LISTEN_ADDRESS" envDefault:":8080"`
-	QueueLength              int           `env:"QUEUE_LENGTH" envDefault:"5"`
-	RateLimitingWindow       time.Duration `env:"RATE_LIMITING_WINDOW" envDefault:"5s"`
-	Path                     string        `env:"URL_PATH" envDefault:"/contact"`
+	ListenAddress             string        `env:"LISTEN_ADDRESS" envDefault:":8080"`
+	QueueLength               int           `env:"QUEUE_LENGTH" envDefault:"5"`
+	RateLimitingWindow        time.Duration `env:"RATE_LIMITING_WINDOW" envDefault:"5s"`
+	Path                      string        `env:"URL_PATH" envDefault:"/contact"`
 	AccessControlAllowOrigin  string        `env:"ACCESS_CONTROL_ALLOW_ORIGIN" envDefault:""`
 	AccessControlAllowOrigins string        `env:"ACCESS_CONTROL_ALLOW_ORIGINS" envDefault:""`
-	Mail                     ConfigEmail
-	Captcha                  ConfigCaptcha
+	Mail                      ConfigEmail
+	Captcha                   ConfigCaptcha
 }
 
 func validateConfig(cfg Config) error {
@@ -365,6 +366,11 @@ func (c ContactHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	userMessage = sanitizePlainTextMessage(userMessage)
+	if isLowQualityMessage(userMessage) {
+		http.Error(w, "Bad Request.", http.StatusBadRequest)
+		logRequestEvent("Low quality message rejected", request, userEmail)
+		return
+	}
 
 	if err := verifyCaptchaToken(c.cfg.Captcha, r.PostFormValue("cap-token")); err != nil {
 		captchaErr, ok := err.(captchaVerificationError)
@@ -401,6 +407,84 @@ func (c ContactHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func sanitizePlainTextMessage(input string) string {
 	bmSanitizer := bluemonday.StrictPolicy()
 	return html.UnescapeString(bmSanitizer.Sanitize(input))
+}
+
+func isLowQualityMessage(input string) bool {
+	message := strings.TrimSpace(input)
+	if runeCount(message) < 10 {
+		return true
+	}
+
+	parts := strings.Fields(message)
+	if len(parts) != 1 {
+		return false
+	}
+
+	token := parts[0]
+	if !isASCIILetters(token) {
+		return false
+	}
+
+	if len(token) >= 24 {
+		return true
+	}
+	if len(token) < 16 || !hasMixedASCIICase(token) {
+		return false
+	}
+
+	return asciiCaseTransitionRatio(token) > randomTextCaseTransitionRate
+}
+
+func runeCount(input string) int {
+	count := 0
+	for range input {
+		count++
+	}
+	return count
+}
+
+func isASCIILetters(input string) bool {
+	if input == "" {
+		return false
+	}
+	for i := 0; i < len(input); i++ {
+		if !isASCIIUpper(input[i]) && !isASCIILower(input[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+func hasMixedASCIICase(input string) bool {
+	hasLower := false
+	hasUpper := false
+	for i := 0; i < len(input); i++ {
+		hasLower = hasLower || isASCIILower(input[i])
+		hasUpper = hasUpper || isASCIIUpper(input[i])
+	}
+	return hasLower && hasUpper
+}
+
+func asciiCaseTransitionRatio(input string) float64 {
+	if len(input) < 2 {
+		return 0
+	}
+
+	transitions := 0
+	for i := 1; i < len(input); i++ {
+		if isASCIILower(input[i-1]) != isASCIILower(input[i]) {
+			transitions++
+		}
+	}
+	return float64(transitions) / float64(len(input)-1)
+}
+
+func isASCIIUpper(b byte) bool {
+	return b >= 'A' && b <= 'Z'
+}
+
+func isASCIILower(b byte) bool {
+	return b >= 'a' && b <= 'z'
 }
 
 func allowedCORSOrigin(cfg Config, requestOrigin string) string {
