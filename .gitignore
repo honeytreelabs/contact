@@ -14,4 +14,19 @@
 # Dependency directories (remove the comment below to include it)
 # vendor/
 
+# Devenv
+.devenv*
+devenv.local.nix
+devenv.local.yaml
+
+# direnv
+.direnv
+.envrc
+
+# pre-commit
+.pre-commit-config.yaml
+
+# Agent Circus
+.agent-circus/
+
 /contact
