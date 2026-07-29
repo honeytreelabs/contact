@@ -391,14 +391,15 @@ func (s *ContactTestSuite) TestContactHandlerLogsLowQualityMessageRejectionReaso
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	response := httptest.NewRecorder()
 
-	output := captureStdout(s, func() {
+	output := captureLogs(s, func() {
 		handler.ServeHTTP(response, request)
 	})
 
 	s.Require().Equal(http.StatusBadRequest, response.Code)
+	s.Require().Contains(output, `level=warn`)
 	s.Require().Contains(output, `event="Low quality message rejected"`)
-	s.Require().Contains(output, `email="sender@example.com"`)
-	s.Require().Contains(output, `reason="single_ascii_word_random_case"`)
+	s.Require().Contains(output, `email=sender@example.com`)
+	s.Require().Contains(output, `reason=single_ascii_word_random_case`)
 }
 
 func (s *ContactTestSuite) TestContactHandlerRequiresCaptchaTokenWhenEnabled() {
@@ -424,6 +425,38 @@ func (s *ContactTestSuite) TestContactHandlerRequiresCaptchaTokenWhenEnabled() {
 	s.Require().Len(handler.contacts, 0)
 }
 
+func (s *ContactTestSuite) TestContactHandlerLogsCaptchaServiceFailuresAsErrors() {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "unavailable", http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	cfg := testConfig()
+	cfg.Captcha = ConfigCaptcha{
+		Enabled:       true,
+		APIEndpoint:   server.URL,
+		Secret:        "secret",
+		VerifyTimeout: time.Second,
+	}
+	handler := ContactHandler{
+		cfg:      cfg,
+		contacts: make(MessageChannel, 1),
+	}
+
+	request := httptest.NewRequest(http.MethodPost, "/contact", strings.NewReader(validContactForm("token").Encode()))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	response := httptest.NewRecorder()
+
+	output := captureLogs(s, func() {
+		handler.ServeHTTP(response, request)
+	})
+
+	s.Require().Equal(http.StatusServiceUnavailable, response.Code)
+	s.Require().Contains(output, `level=error`)
+	s.Require().Contains(output, `event="CAPTCHA verification failed"`)
+	s.Require().Contains(output, `error="CAPTCHA verification is unavailable"`)
+}
+
 func validContactForm(capToken string) url.Values {
 	form := url.Values{}
 	form.Set("email", "sender@example.com")
@@ -435,14 +468,14 @@ func validContactForm(capToken string) url.Values {
 	return form
 }
 
-func captureStdout(s *ContactTestSuite, fn func()) string {
-	originalStdout := os.Stdout
+func captureLogs(s *ContactTestSuite, fn func()) string {
+	originalLogger := appLogger
 	reader, writer, err := os.Pipe()
 	s.Require().NoError(err)
 
-	os.Stdout = writer
+	appLogger = newLogger(writer)
 	defer func() {
-		os.Stdout = originalStdout
+		appLogger = originalLogger
 	}()
 
 	fn()

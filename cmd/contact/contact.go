@@ -2,12 +2,14 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"html"
-	"log"
+	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/mail"
@@ -37,6 +39,7 @@ var captchaHTTPClient = &http.Client{
 }
 
 var buildCommit = "unknown"
+var appLogger = newLogger(os.Stdout)
 
 type ConfigEmail struct {
 	From     string `env:"MAIL_FROM,notEmpty"`
@@ -180,54 +183,45 @@ func remoteIP(remoteAddr string) string {
 	return host
 }
 
-func logRequestEvent(event string, req requestMetadata, email string) {
-	fmt.Printf(
-		"event=%q service_revision=%q request_id=%q email=%q remote_addr=%q x_forwarded_for=%q x_real_ip=%q user_agent=%q origin=%q referer=%q\n",
-		event,
-		serviceRevision(),
-		req.id,
-		email,
-		req.remoteAddr,
-		req.xForwardedFor,
-		req.xRealIP,
-		req.userAgent,
-		req.origin,
-		req.referer,
-	)
+func newLogger(output io.Writer) *slog.Logger {
+	return slog.New(slog.NewTextHandler(output, &slog.HandlerOptions{
+		ReplaceAttr: func(_ []string, attr slog.Attr) slog.Attr {
+			if attr.Key == slog.LevelKey {
+				attr.Value = slog.StringValue(strings.ToLower(attr.Value.String()))
+			}
+			return attr
+		},
+	}))
 }
 
-func logRequestEventWithReason(event string, req requestMetadata, email string, reason lowQualityMessageRejectionReason) {
-	fmt.Printf(
-		"event=%q service_revision=%q request_id=%q email=%q remote_addr=%q x_forwarded_for=%q x_real_ip=%q user_agent=%q origin=%q referer=%q reason=%q\n",
-		event,
-		serviceRevision(),
-		req.id,
-		email,
-		req.remoteAddr,
-		req.xForwardedFor,
-		req.xRealIP,
-		req.userAgent,
-		req.origin,
-		req.referer,
-		reason,
-	)
+func logEvent(level slog.Level, event string, attrs ...slog.Attr) {
+	attrs = append([]slog.Attr{
+		slog.String("event", event),
+		slog.String("service_revision", serviceRevision()),
+	}, attrs...)
+	appLogger.LogAttrs(context.Background(), level, event, attrs...)
 }
 
-func logRequestError(event string, req requestMetadata, email string, err error) {
-	fmt.Printf(
-		"event=%q service_revision=%q request_id=%q email=%q remote_addr=%q x_forwarded_for=%q x_real_ip=%q user_agent=%q origin=%q referer=%q error=%q\n",
-		event,
-		serviceRevision(),
-		req.id,
-		email,
-		req.remoteAddr,
-		req.xForwardedFor,
-		req.xRealIP,
-		req.userAgent,
-		req.origin,
-		req.referer,
-		err.Error(),
-	)
+func logRequestEvent(level slog.Level, event string, req requestMetadata, email string, attrs ...slog.Attr) {
+	attrs = append(requestLogAttrs(req, email), attrs...)
+	logEvent(level, event, attrs...)
+}
+
+func logRequestError(level slog.Level, event string, req requestMetadata, email string, err error) {
+	logRequestEvent(level, event, req, email, slog.String("error", err.Error()))
+}
+
+func requestLogAttrs(req requestMetadata, email string) []slog.Attr {
+	return []slog.Attr{
+		slog.String("request_id", req.id),
+		slog.String("email", email),
+		slog.String("remote_addr", req.remoteAddr),
+		slog.String("x_forwarded_for", req.xForwardedFor),
+		slog.String("x_real_ip", req.xRealIP),
+		slog.String("user_agent", req.userAgent),
+		slog.String("origin", req.origin),
+		slog.String("referer", req.referer),
+	}
 }
 
 func serviceRevision() string {
@@ -351,13 +345,13 @@ func (c ContactHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	if r.URL.Path != c.cfg.Path {
 		http.Error(w, "Not found.", http.StatusNotFound)
-		fmt.Printf("Path \"%s\" not found.\n", r.URL.Path)
+		logRequestEvent(slog.LevelWarn, "Path not found", request, "", slog.String("path", r.URL.Path))
 		return
 	}
 
 	if r.Method != "POST" {
 		http.Error(w, "Bad Request.", http.StatusBadRequest)
-		fmt.Printf("Wrong HTTP method \"%s\"\n", r.Method)
+		logRequestEvent(slog.LevelWarn, "Wrong HTTP method", request, "", slog.String("method", r.Method))
 		return
 	}
 
@@ -365,20 +359,20 @@ func (c ContactHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "Bad Request.", http.StatusBadRequest)
-		fmt.Printf("Cannot parse form: %v\n", err)
+		logRequestError(slog.LevelWarn, "Cannot parse form", request, "", err)
 		return
 	}
 
 	if r.PostFormValue("contact-dsgvo-checkbox") == "" {
 		http.Error(w, "Bad Request.", http.StatusBadRequest)
-		fmt.Printf("DSGVO checkbox not activated.\n")
+		logRequestEvent(slog.LevelWarn, "DSGVO checkbox not activated", request, "")
 		return
 	}
 
 	userEmail := r.PostFormValue("email")
 	if userEmail == "" || isExcludedEmail(userEmail) {
 		http.Error(w, "Bad Request.", http.StatusBadRequest)
-		fmt.Printf("Email address not submitted.\n")
+		logRequestEvent(slog.LevelWarn, "Email address not submitted", request, userEmail)
 		return
 	}
 
@@ -386,14 +380,14 @@ func (c ContactHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	userMessage := r.PostFormValue("message")
 	if userMessage == "" {
 		http.Error(w, "Bad Request.", http.StatusBadRequest)
-		fmt.Printf("No message given.\n")
+		logRequestEvent(slog.LevelWarn, "No message given", request, userEmail)
 		return
 	}
 
 	userMessage = sanitizePlainTextMessage(userMessage)
 	if rejected, reason := isLowQualityMessageRejected(userMessage); rejected {
 		http.Error(w, "Bad Request.", http.StatusBadRequest)
-		logRequestEventWithReason("Low quality message rejected", request, userEmail, reason)
+		logRequestEvent(slog.LevelWarn, "Low quality message rejected", request, userEmail, slog.String("reason", string(reason)))
 		return
 	}
 
@@ -406,11 +400,15 @@ func (c ContactHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		http.Error(w, captchaErr.message, captchaErr.statusCode)
-		logRequestError("CAPTCHA verification failed", request, userEmail, err)
+		level := slog.LevelWarn
+		if captchaErr.statusCode == http.StatusServiceUnavailable {
+			level = slog.LevelError
+		}
+		logRequestError(level, "CAPTCHA verification failed", request, userEmail, err)
 		return
 	}
 	if c.cfg.Captcha.Enabled {
-		logRequestEvent("CAPTCHA verification succeeded", request, userEmail)
+		logRequestEvent(slog.LevelInfo, "CAPTCHA verification succeeded", request, userEmail)
 	}
 
 	// Non-Blocking Channel Operations: https://gobyexample.com/non-blocking-channel-operations
@@ -423,6 +421,7 @@ func (c ContactHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		break
 	default:
 		http.Error(w, "Contact not processed.", http.StatusTooManyRequests)
+		logRequestEvent(slog.LevelWarn, "Contact queue full", request, userEmail)
 		return
 	}
 
@@ -587,12 +586,12 @@ func parseMailboxAddress(input string) (string, error) {
 func isEmailAddressValid(input string) bool {
 	address, err := parseMailboxAddress(input)
 	if err != nil {
-		fmt.Printf("Cannot parse address: %v\n", err)
+		logEvent(slog.LevelWarn, "Cannot parse address", slog.String("error", err.Error()))
 		return false
 	}
 	domain := strings.Split(address, "@")[1]
 	if mx, errLookup := net.LookupMX(domain); errLookup != nil || len(mx) == 0 {
-		fmt.Printf("Cannot lookup MX record: %v\n", errLookup)
+		logEvent(slog.LevelWarn, "Cannot lookup MX record", slog.String("domain", domain), slog.String("error", errorString(errLookup)))
 		return false
 	}
 	return true
@@ -603,18 +602,18 @@ func isEmailAddressValid(input string) bool {
 func sendMail(cfg Config, msg Message) {
 	userEmail, err := parseMailboxAddress(msg.email)
 	if err != nil || !isEmailAddressValid(userEmail) {
-		fmt.Printf("Cannot parse given email address: %s\n", msg.email)
+		logRequestEvent(slog.LevelWarn, "Cannot parse given email address", msg.request, msg.email)
 		return
 	}
 
 	sender, err := parseMailboxAddress(cfg.Mail.From)
 	if err != nil {
-		fmt.Printf("Cannot parse sender address: %v\n", err)
+		logRequestError(slog.LevelError, "Cannot parse sender address", msg.request, msg.email, err)
 		return
 	}
 	receiver, err := parseMailboxAddress(cfg.Mail.To)
 	if err != nil {
-		fmt.Printf("Cannot parse receiver address: %v\n", err)
+		logRequestError(slog.LevelError, "Cannot parse receiver address", msg.request, msg.email, err)
 		return
 	}
 
@@ -641,10 +640,17 @@ User Message:
 		[]string{receiver},
 		[]byte(raw))
 	if err != nil {
-		fmt.Println(err)
+		logRequestError(slog.LevelError, "Cannot send email", msg.request, msg.email, err)
 		return
 	}
-	logRequestEvent("Email sent successfully", msg.request, msg.email)
+	logRequestEvent(slog.LevelInfo, "Email sent successfully", msg.request, msg.email)
+}
+
+func errorString(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
 }
 
 // rateLimit reads out of the queue of email addresses
@@ -673,14 +679,20 @@ func rateLimit(cfg Config, source MessageChannel, destination func(cfg Config, m
 func main() {
 	cfg := Config{}
 	if err := env.Parse(&cfg); err != nil {
-		fmt.Printf("%+v\n", err)
+		logEvent(slog.LevelError, "Cannot parse config", slog.String("error", err.Error()))
 		os.Exit(1)
 	}
 	if err := validateConfig(cfg); err != nil {
-		fmt.Printf("%+v\n", err)
+		logEvent(slog.LevelError, "Invalid config", slog.String("error", err.Error()))
 		os.Exit(1)
 	}
-	fmt.Printf("event=%q service_revision=%q listen_address=%q url_path=%q captcha_enabled=%t\n", "ContactBot starting", serviceRevision(), cfg.ListenAddress, cfg.Path, cfg.Captcha.Enabled)
+	logEvent(
+		slog.LevelInfo,
+		"ContactBot starting",
+		slog.String("listen_address", cfg.ListenAddress),
+		slog.String("url_path", cfg.Path),
+		slog.Bool("captcha_enabled", cfg.Captcha.Enabled),
+	)
 
 	// Length and capacity of a channel in go: https://golangbyexample.com/length-and-capacity-channel-golang/
 	contacts := make(MessageChannel, cfg.QueueLength)
@@ -703,5 +715,8 @@ func main() {
 		WriteTimeout:      10 * time.Second,
 		IdleTimeout:       30 * time.Second,
 	}
-	log.Fatal(server.ListenAndServe())
+	if err := server.ListenAndServe(); err != nil {
+		logEvent(slog.LevelError, "HTTP server stopped", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
 }
