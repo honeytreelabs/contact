@@ -23,6 +23,10 @@ request:
 test:
 	$(GO_TEST) ./...
 
+.PHONY: format
+format:
+	gofmt -w cmd/contact/contact.go cmd/contact/contact_test.go
+
 ## container targets
 
 .PHONY: build release push
