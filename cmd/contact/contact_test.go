@@ -2,9 +2,11 @@ package main
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -336,6 +338,10 @@ func (s *ContactTestSuite) TestLowQualityMessageDetectionAllowsUsefulMessages() 
 func (s *ContactTestSuite) TestLowQualityMessageDetectionRejectsVeryShortMessages() {
 	s.Require().True(isLowQualityMessage("hello"))
 	s.Require().True(isLowQualityMessage("test"))
+
+	rejected, reason := isLowQualityMessageRejected("hello")
+	s.Require().True(rejected)
+	s.Require().Equal(lowQualityMessageTooShort, reason)
 }
 
 func (s *ContactTestSuite) TestLowQualityMessageDetectionRejectsModerateCaseTransitionSpam() {
@@ -343,6 +349,16 @@ func (s *ContactTestSuite) TestLowQualityMessageDetectionRejectsModerateCaseTran
 
 	s.Require().Greater(asciiCaseTransitionRatio(message), randomTextCaseTransitionRate)
 	s.Require().True(isLowQualityMessage(message))
+
+	rejected, reason := isLowQualityMessageRejected(message)
+	s.Require().True(rejected)
+	s.Require().Equal(lowQualityMessageSingleASCIIWordMixed, reason)
+}
+
+func (s *ContactTestSuite) TestLowQualityMessageDetectionRejectsLongSingleASCIIWords() {
+	rejected, reason := isLowQualityMessageRejected("abcdefghijklmnopqrstuvwxyz")
+	s.Require().True(rejected)
+	s.Require().Equal(lowQualityMessageSingleASCIIWordLong, reason)
 }
 
 func (s *ContactTestSuite) TestContactHandlerRejectsLowQualityMessages() {
@@ -361,6 +377,28 @@ func (s *ContactTestSuite) TestContactHandlerRejectsLowQualityMessages() {
 
 	s.Require().Equal(http.StatusBadRequest, response.Code)
 	s.Require().Len(handler.contacts, 0)
+}
+
+func (s *ContactTestSuite) TestContactHandlerLogsLowQualityMessageRejectionReason() {
+	handler := ContactHandler{
+		cfg:      testConfig(),
+		contacts: make(MessageChannel, 1),
+	}
+	form := validContactForm("")
+	form.Set("message", "XtHKDAfmDUYjUvgOh")
+
+	request := httptest.NewRequest(http.MethodPost, "/contact", strings.NewReader(form.Encode()))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	response := httptest.NewRecorder()
+
+	output := captureStdout(s, func() {
+		handler.ServeHTTP(response, request)
+	})
+
+	s.Require().Equal(http.StatusBadRequest, response.Code)
+	s.Require().Contains(output, `event="Low quality message rejected"`)
+	s.Require().Contains(output, `email="sender@example.com"`)
+	s.Require().Contains(output, `reason="single_ascii_word_random_case"`)
 }
 
 func (s *ContactTestSuite) TestContactHandlerRequiresCaptchaTokenWhenEnabled() {
@@ -395,6 +433,25 @@ func validContactForm(capToken string) url.Values {
 		form.Set("cap-token", capToken)
 	}
 	return form
+}
+
+func captureStdout(s *ContactTestSuite, fn func()) string {
+	originalStdout := os.Stdout
+	reader, writer, err := os.Pipe()
+	s.Require().NoError(err)
+
+	os.Stdout = writer
+	defer func() {
+		os.Stdout = originalStdout
+	}()
+
+	fn()
+	s.Require().NoError(writer.Close())
+
+	output, err := io.ReadAll(reader)
+	s.Require().NoError(err)
+	s.Require().NoError(reader.Close())
+	return string(output)
 }
 
 func (s *ContactTestSuite) TestExcludedEmail() {

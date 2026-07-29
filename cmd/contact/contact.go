@@ -116,6 +116,14 @@ type ContactHandler struct {
 	contacts MessageChannel
 }
 
+type lowQualityMessageRejectionReason string
+
+const (
+	lowQualityMessageTooShort             lowQualityMessageRejectionReason = "message_too_short"
+	lowQualityMessageSingleASCIIWordLong  lowQualityMessageRejectionReason = "single_ascii_word_too_long"
+	lowQualityMessageSingleASCIIWordMixed lowQualityMessageRejectionReason = "single_ascii_word_random_case"
+)
+
 type captchaVerificationError struct {
 	statusCode int
 	message    string
@@ -185,6 +193,23 @@ func logRequestEvent(event string, req requestMetadata, email string) {
 		req.userAgent,
 		req.origin,
 		req.referer,
+	)
+}
+
+func logRequestEventWithReason(event string, req requestMetadata, email string, reason lowQualityMessageRejectionReason) {
+	fmt.Printf(
+		"event=%q service_revision=%q request_id=%q email=%q remote_addr=%q x_forwarded_for=%q x_real_ip=%q user_agent=%q origin=%q referer=%q reason=%q\n",
+		event,
+		serviceRevision(),
+		req.id,
+		email,
+		req.remoteAddr,
+		req.xForwardedFor,
+		req.xRealIP,
+		req.userAgent,
+		req.origin,
+		req.referer,
+		reason,
 	)
 }
 
@@ -366,9 +391,9 @@ func (c ContactHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	userMessage = sanitizePlainTextMessage(userMessage)
-	if isLowQualityMessage(userMessage) {
+	if rejected, reason := isLowQualityMessageRejected(userMessage); rejected {
 		http.Error(w, "Bad Request.", http.StatusBadRequest)
-		logRequestEvent("Low quality message rejected", request, userEmail)
+		logRequestEventWithReason("Low quality message rejected", request, userEmail, reason)
 		return
 	}
 
@@ -410,29 +435,38 @@ func sanitizePlainTextMessage(input string) string {
 }
 
 func isLowQualityMessage(input string) bool {
+	rejected, _ := isLowQualityMessageRejected(input)
+	return rejected
+}
+
+func isLowQualityMessageRejected(input string) (bool, lowQualityMessageRejectionReason) {
 	message := strings.TrimSpace(input)
 	if runeCount(message) < 10 {
-		return true
+		return true, lowQualityMessageTooShort
 	}
 
 	parts := strings.Fields(message)
 	if len(parts) != 1 {
-		return false
+		return false, ""
 	}
 
 	token := parts[0]
 	if !isASCIILetters(token) {
-		return false
+		return false, ""
 	}
 
 	if len(token) >= 24 {
-		return true
+		return true, lowQualityMessageSingleASCIIWordLong
 	}
 	if len(token) < 16 || !hasMixedASCIICase(token) {
-		return false
+		return false, ""
 	}
 
-	return asciiCaseTransitionRatio(token) > randomTextCaseTransitionRate
+	if asciiCaseTransitionRatio(token) > randomTextCaseTransitionRate {
+		return true, lowQualityMessageSingleASCIIWordMixed
+	}
+
+	return false, ""
 }
 
 func runeCount(input string) int {
