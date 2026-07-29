@@ -1,5 +1,5 @@
 IMAGE   ?= registry-rw.honeytreelabs.com/contact
-TAG     ?= v1.6.0
+TAG     ?= v1.7.0
 GIT_COMMIT ?= $(shell git rev-parse --short=12 HEAD 2>/dev/null || echo unknown)
 GO_TEST := go test
 
@@ -22,6 +22,10 @@ request:
 .PHONY: test
 test:
 	$(GO_TEST) ./...
+
+.PHONY: format
+format:
+	gofmt -w cmd/contact/contact.go cmd/contact/contact_test.go
 
 ## container targets
 
