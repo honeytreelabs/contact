@@ -307,6 +307,7 @@ func (s *ContactTestSuite) TestPlainTextMessageSanitizationStripsHTMLTags() {
 
 func (s *ContactTestSuite) TestLowQualityMessageDetectionRejectsSpamSamples() {
 	spamMessages := []string{
+		"GPPeauTCvZwusicdogp",
 		"diSoFZsFaSfrdwaEfTzykIf",
 		"RCkvCvEXlcNiIksWtLfsXvS",
 		"RVLlOWVVGEPxZlmDfwaXHg",

@@ -26,9 +26,10 @@ import (
 )
 
 const (
-	maxRequestBodyBytes          = 16 * 1024
-	maxCapTokenLength            = 4096
-	randomTextCaseTransitionRate = 0.30
+	maxRequestBodyBytes              = 16 * 1024
+	maxCapTokenLength                = 4096
+	randomTextCaseTransitionRate     = 0.30
+	initialUpperRunCaseTransitionMin = 0.25
 )
 
 var captchaHTTPClient = &http.Client{
@@ -461,11 +462,15 @@ func isLowQualityMessageRejected(input string) (bool, lowQualityMessageRejection
 		return false, ""
 	}
 
-	if asciiCaseTransitionRatio(token) > randomTextCaseTransitionRate {
+	if asciiCaseTransitionRatio(token) > randomTextCaseTransitionRate || hasRandomCaseAfterInitialUpperRun(token) {
 		return true, lowQualityMessageSingleASCIIWordMixed
 	}
 
 	return false, ""
+}
+
+func hasRandomCaseAfterInitialUpperRun(input string) bool {
+	return leadingASCIIUpperRunLength(input) >= 2 && asciiCaseTransitionRatio(input) >= initialUpperRunCaseTransitionMin
 }
 
 func runeCount(input string) int {
@@ -496,6 +501,17 @@ func hasMixedASCIICase(input string) bool {
 		hasUpper = hasUpper || isASCIIUpper(input[i])
 	}
 	return hasLower && hasUpper
+}
+
+func leadingASCIIUpperRunLength(input string) int {
+	runLength := 0
+	for i := 0; i < len(input); i++ {
+		if !isASCIIUpper(input[i]) {
+			break
+		}
+		runLength++
+	}
+	return runLength
 }
 
 func asciiCaseTransitionRatio(input string) float64 {
