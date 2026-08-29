@@ -8,8 +8,8 @@
   packages = [
     pkgs.git
     pkgs.git-absorb
-	pkgs.delve
-	pkgs.gopls
+	  pkgs.delve
+	  pkgs.gopls
   ];
 
   # https://devenv.sh/languages/
