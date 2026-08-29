@@ -1,7 +1,9 @@
 IMAGE   ?= registry-rw.honeytreelabs.com/contact
 TAG     ?= v1.7.0
 GIT_COMMIT ?= $(shell git rev-parse --short=12 HEAD 2>/dev/null || echo unknown)
+CONTAINER ?= podman
 GO_TEST := go test
+GOFMT_FILES := cmd/contact/contact.go cmd/contact/contact_test.go
 
 ifeq ($(VERBOSE),1)
 GO_TEST += -v
@@ -23,19 +25,29 @@ request:
 test:
 	$(GO_TEST) ./...
 
+.PHONY: check
+check:
+	go mod verify
+	test -z "$$(gofmt -l $(GOFMT_FILES))"
+	$(GO_TEST) ./...
+
 .PHONY: format
 format:
-	gofmt -w cmd/contact/contact.go cmd/contact/contact_test.go
+	gofmt -w $(GOFMT_FILES)
+
+.PHONY: audit
+audit:
+	go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 
 ## container targets
 
 .PHONY: build release push
 build:
-	podman build --build-arg GIT_COMMIT=$(GIT_COMMIT) -t $(IMAGE):$(TAG) .
+	$(CONTAINER) build --build-arg GIT_COMMIT=$(GIT_COMMIT) -t $(IMAGE):$(TAG) .
 
 release: build
-	podman tag $(IMAGE):$(TAG) $(IMAGE):latest
+	$(CONTAINER) tag $(IMAGE):$(TAG) $(IMAGE):latest
 
 push: release
-	podman push $(IMAGE):latest
-	podman push $(IMAGE):$(TAG)
+	$(CONTAINER) push $(IMAGE):latest
+	$(CONTAINER) push $(IMAGE):$(TAG)
