@@ -1,5 +1,5 @@
 IMAGE   ?= registry-rw.honeytreelabs.com/contact
-TAG     ?= v1.7.0
+TAG     ?= v1.8.0
 GIT_COMMIT ?= $(shell git rev-parse --short=12 HEAD 2>/dev/null || echo unknown)
 CONTAINER ?= podman
 GO_TEST := go test
