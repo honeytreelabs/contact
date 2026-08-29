@@ -1,6 +1,6 @@
 module github.com/honeytreelabs/contact
 
-go 1.25.0
+go 1.27.0
 
 require (
 	github.com/caarlos0/env/v6 v6.10.1

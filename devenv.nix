@@ -18,8 +18,9 @@
     enable = true;
     # Use nixpkgs' Go package instead of languages.go.version, which routes
     # through go-overlay and can fail during evaluation on restricted Nix setups.
-    # Change this to pkgs.go_1_25 if the project needs the 1.25 release line.
-    package = pkgs.go_1_26;
+    # Change this to an older pkgs.go_1_* package only if the project needs
+    # that release line.
+    package = pkgs.go_1_27;
     enableHardeningWorkaround = true;
     delve.enable = true;
   };

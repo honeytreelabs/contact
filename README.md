@@ -7,7 +7,7 @@
 *Process contact data provided by visitors of our website.*
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Go 1.25](https://img.shields.io/badge/Go-1.25-00ADD8?logo=go&logoColor=white)](go.mod)
+[![Go 1.27](https://img.shields.io/badge/Go-1.27-00ADD8?logo=go&logoColor=white)](go.mod)
 [![Docker](https://img.shields.io/badge/Docker-supported-2496ED?logo=docker&logoColor=white)](https://www.docker.com/)
 [![CI](https://github.com/honeytreelabs/contact/actions/workflows/ci.yml/badge.svg)](https://github.com/honeytreelabs/contact/actions/workflows/ci.yml)
 [![Security](https://github.com/honeytreelabs/contact/actions/workflows/security.yml/badge.svg)](https://github.com/honeytreelabs/contact/actions/workflows/security.yml)
