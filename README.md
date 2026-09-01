@@ -46,6 +46,25 @@ compatible runtime should be used:
 CONTAINER=docker make build
 ```
 
+## Rootless Podman
+
+The production image is suitable for rootless Podman. It runs as the
+unprivileged `contact` user with UID/GID `10001`, listens on port `8080` by
+default, and does not require writable application directories.
+
+The sample Compose file is intentionally compatible with a restricted rootless
+deployment: it uses a read-only root filesystem, drops all Linux capabilities,
+sets `no-new-privileges`, and publishes `8080:8080`.
+
+Operational notes:
+
+- Ensure the host has subordinate UID/GID ranges configured for rootless Podman.
+- Publish an unprivileged host port such as `8080`; use a reverse proxy for
+  public `80`/`443` traffic.
+- Allow outbound DNS, SMTP, and optional CAPTCHA verification traffic.
+- If bind mounts are added later, make them readable or writable by container
+  UID/GID `10001`, as required by the mounted path.
+
 GitHub Actions run the check suite and container build for pushes to `main` and
 pull requests. The security workflow runs `govulncheck` for pushes, pull
 requests, manual dispatches, and a weekly scheduled audit. Dependabot opens
