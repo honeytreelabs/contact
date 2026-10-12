@@ -1,6 +1,11 @@
 { pkgs, lib, config, inputs, ... }:
 
-{
+let
+  # Devenv's rolling Nixpkgs provides Go 1.27.1, which is too old for this
+  # module. Overriding only the compiler to 1.27.2 also makes its older go-tools
+  # fail on incompatible export data, so pin Go and its tools as one package set.
+  goPkgs = inputs.go-nixpkgs.legacyPackages.${pkgs.stdenv.hostPlatform.system};
+in {
   # https://devenv.sh/basics/
   env.GREET = "devenv";
 
@@ -8,22 +13,23 @@
   packages = [
     pkgs.git
     pkgs.git-absorb
-	  pkgs.delve
-	  pkgs.gopls
+	  goPkgs.go_1_27
+	  goPkgs.delve
+	  goPkgs.gopls
+	  goPkgs.gotools
+	  goPkgs.gomodifytags
+	  goPkgs.impl
+	  goPkgs.go-tools
+	  goPkgs.gotests
+	  goPkgs.iferr
   ];
 
   # https://devenv.sh/languages/
   # languages.rust.enable = true;
-  languages.go = {
-    enable = true;
-    # Use nixpkgs' Go package instead of languages.go.version, which routes
-    # through go-overlay and can fail during evaluation on restricted Nix setups.
-    # Change this to an older pkgs.go_1_* package only if the project needs
-    # that release line.
-    package = pkgs.go_1_27;
-    enableHardeningWorkaround = true;
-    delve.enable = true;
-  };
+  env.GOROOT = "${goPkgs.go_1_27}/share/go";
+  env.GOPATH = config.env.DEVENV_STATE + "/go";
+  env.GOTOOLCHAIN = "local";
+  hardeningDisable = [ "fortify" ];
 
   # https://devenv.sh/processes/
   # processes.dev.exec = "${lib.getExe pkgs.watchexec} -n -- ls -la";
@@ -38,6 +44,7 @@
 
   # https://devenv.sh/basics/
   enterShell = ''
+    export PATH=$GOPATH/bin:$PATH
     hello         # Run scripts directly
     git --version # Use packages
   '';
