@@ -3,7 +3,7 @@ TAG     ?= v1.8.2
 GIT_COMMIT ?= $(shell git rev-parse --short=12 HEAD 2>/dev/null || echo unknown)
 CONTAINER ?= podman
 GO_TEST := go test
-GOFMT_FILES := cmd/contact/contact.go cmd/contact/contact_test.go
+GOFMT_FILES := cmd/contact/contact.go cmd/contact/contact_test.go cmd/contact/heuristic_gap_test.go
 
 ifeq ($(VERBOSE),1)
 GO_TEST += -v

@@ -26,10 +26,24 @@ import (
 )
 
 const (
-	maxRequestBodyBytes              = 16 * 1024
-	maxCapTokenLength                = 4096
-	randomTextCaseTransitionRate     = 0.30
+	maxRequestBodyBytes          = 16 * 1024
+	maxCapTokenLength            = 4096
+	randomTextCaseTransitionRate = 0.25
+	// Word sequences must use a looser case-ratio threshold than single words:
+	// German capitalizes every noun, so an ordinary chain like "Mein Freund
+	// Peter Maier" already shows ~37% transitions (two per capital). Random
+	// case generation lands at ~50% and is caught well above 0.38.
+	joinedTextCaseTransitionRate     = 0.38
 	initialUpperRunCaseTransitionMin = 0.25
+	// German and English letter streams contain roughly 35-45% vowels even in
+	// short samples; random ASCII generation averages ~23% (6 of 26 letters).
+	// The floor is set to 0.27 to stay clear of consonant-heavy German
+	// compounds while still detecting generated text.
+	randomTextVowelRatioMin = 0.27
+	// The vowel floor only fires when the text also shows several case
+	// transitions: single-case legitimate word sequences (compound nouns,
+	// "Der Wartungsplan") have too few transitions to be flagged.
+	randomTextMinCaseTransitions = 3
 )
 
 var captchaHTTPClient = &http.Client{
@@ -446,7 +460,10 @@ func isLowQualityMessageRejected(input string) (bool, lowQualityMessageRejection
 	}
 
 	parts := strings.Fields(message)
-	if len(parts) != 1 {
+	if len(parts) > 1 {
+		if isRandomCaseSplitAcrossWhitespace(parts) {
+			return true, lowQualityMessageSingleASCIIWordMixed
+		}
 		return false, ""
 	}
 
@@ -462,7 +479,9 @@ func isLowQualityMessageRejected(input string) (bool, lowQualityMessageRejection
 		return false, ""
 	}
 
-	if asciiCaseTransitionRatio(token) > randomTextCaseTransitionRate || hasRandomCaseAfterInitialUpperRun(token) {
+	if asciiCaseTransitionRatio(token) > randomTextCaseTransitionRate ||
+		hasRandomCaseAfterInitialUpperRun(token) ||
+		hasRandomCaseOrVowelProfile(token) {
 		return true, lowQualityMessageSingleASCIIWordMixed
 	}
 
@@ -471,6 +490,36 @@ func isLowQualityMessageRejected(input string) (bool, lowQualityMessageRejection
 
 func hasRandomCaseAfterInitialUpperRun(input string) bool {
 	return leadingASCIIUpperRunLength(input) >= 2 && asciiCaseTransitionRatio(input) >= initialUpperRunCaseTransitionMin
+}
+
+// A random string can be split across whitespace ("wvwvWIUPQg fcCDTo") to
+// escape the single-word analysis, so multi-word messages are analyzed on
+// their words joined together. The too-long rule is deliberately not applied
+// here: joined prose like "call me at your earliest convenience" is long on
+// purpose. The case-ratio rule uses the looser joined threshold because
+// German capitalizes every noun, and the vowel floor carries the rest.
+func isRandomCaseSplitAcrossWhitespace(parts []string) bool {
+	joined := strings.Join(parts, "")
+	if len(joined) < 16 || !isASCIILetters(joined) || !hasMixedASCIICase(joined) {
+		return false
+	}
+
+	return asciiCaseTransitionRatio(joined) > joinedTextCaseTransitionRate ||
+		hasRandomCaseAfterInitialUpperRun(joined) ||
+		hasRandomCaseOrVowelProfile(joined)
+}
+
+// hasRandomCaseOrVowelProfile catches generated text that keeps its case
+// transition ratio below the plain thresholds: random ASCII generation cannot
+// sustain German or English vowel density, but suppressing case transitions
+// enough to hide also means producing nearly uniform text. Requiring several
+// transitions on both sides keeps legitimate compounds like
+// "Buchhaltungsplan" (one transition, 25% vowels) safely on the accepted side.
+func hasRandomCaseOrVowelProfile(input string) bool {
+	if asciiCaseTransitions(input) < randomTextMinCaseTransitions {
+		return false
+	}
+	return asciiVowelRatio(input) < randomTextVowelRatioMin
 }
 
 func runeCount(input string) int {
@@ -514,18 +563,45 @@ func leadingASCIIUpperRunLength(input string) int {
 	return runLength
 }
 
-func asciiCaseTransitionRatio(input string) float64 {
-	if len(input) < 2 {
-		return 0
-	}
-
+func asciiCaseTransitions(input string) int {
 	transitions := 0
 	for i := 1; i < len(input); i++ {
 		if isASCIILower(input[i-1]) != isASCIILower(input[i]) {
 			transitions++
 		}
 	}
-	return float64(transitions) / float64(len(input)-1)
+	return transitions
+}
+
+func asciiCaseTransitionRatio(input string) float64 {
+	if len(input) < 2 {
+		return 0
+	}
+	return float64(asciiCaseTransitions(input)) / float64(len(input)-1)
+}
+
+func isASCIIVowel(b byte) bool {
+	switch b {
+	case 'a', 'e', 'i', 'o', 'u', 'y':
+		return true
+	case 'A', 'E', 'I', 'O', 'U', 'Y':
+		return true
+	}
+	return false
+}
+
+func asciiVowelRatio(input string) float64 {
+	if len(input) == 0 {
+		return 0
+	}
+
+	vowels := 0
+	for i := 0; i < len(input); i++ {
+		if isASCIIVowel(input[i]) {
+			vowels++
+		}
+	}
+	return float64(vowels) / float64(len(input))
 }
 
 func isASCIIUpper(b byte) bool {
