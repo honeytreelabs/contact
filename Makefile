@@ -1,5 +1,5 @@
 IMAGE   ?= registry-rw.honeytreelabs.com/contact
-TAG     ?= v1.8.4
+TAG     ?= v1.8.5
 GIT_COMMIT ?= $(shell git rev-parse --short=12 HEAD 2>/dev/null || echo unknown)
 # Development images are tagged as a SemVer pre-release of the version in TAG,
 # stamped with the UTC date so consecutive builds sort chronologically. The
